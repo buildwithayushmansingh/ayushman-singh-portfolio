@@ -13,6 +13,8 @@
   --accent-2-soft: rgba(177, 78, 255, 0.13);
   --glow-1: rgba(46, 230, 214, 0.06);
   --glow-2: rgba(177, 78, 255, 0.05);
+  --glass-bg: rgba(13, 19, 26, 0.55);
+  --glass-border: rgba(255, 255, 255, 0.08);
   --font-mono: 'JetBrains Mono', monospace;
   --maxw: 1160px;
 }
@@ -33,6 +35,8 @@
   --accent-2-soft: rgba(124, 58, 237, 0.10);
   --glow-1: rgba(14, 143, 134, 0.05);
   --glow-2: rgba(124, 58, 237, 0.04);
+  --glass-bg: rgba(255, 255, 255, 0.55);
+  --glass-border: rgba(18, 21, 28, 0.08);
 }
 
 /* flatten the neon glows for a clean light UI; boost the background text/particles
@@ -172,6 +176,8 @@
   --accent-2-soft: rgba(57, 255, 106, 0.09);
   --glow-1: rgba(57, 255, 106, 0.07);
   --glow-2: rgba(57, 255, 106, 0.04);
+  --glass-bg: rgba(5, 16, 6, 0.55);
+  --glass-border: rgba(57, 255, 106, 0.15);
 }
 
 /* monospace everywhere, sharp corners, CRT scanline overlay — a genuinely different UI, not just a recolor */
@@ -619,8 +625,10 @@ section {
 }
 
 .btn-ghost {
+  background: transparent;
   border: 1px solid var(--border);
   color: var(--text);
+  font-family: inherit;
 }
 
 .btn-ghost:hover {
@@ -4436,4 +4444,286 @@ footer {
 .activity-detail-repo {
   margin-top: 10px;
   color: var(--text);
+}
+
+/* ---------- CONTACT: glassmorphism social card grid ---------- */
+.contact-container {
+  max-width: 900px;
+  margin: 0 auto;
+  text-align: center;
+  padding: 56px 40px;
+  border-radius: 28px;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.3), 0 0 60px var(--accent-soft);
+}
+
+.contact-heading {
+  font-size: clamp(28px, 4vw, 38px);
+}
+
+.contact-subtitle {
+  color: var(--muted);
+  font-size: 16px;
+  margin-top: 14px;
+  max-width: 52ch;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.contact-social-grid {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 18px;
+  margin-top: 40px;
+}
+
+.contact-social-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  width: 150px;
+  padding: 26px 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--glass-border);
+  transition: transform 0.35s ease, background 0.35s ease, border-color 0.35s ease, box-shadow 0.35s ease;
+}
+
+.contact-social-card:hover {
+  transform: translateY(-10px);
+  background: rgba(255, 255, 255, 0.07);
+  border-color: var(--card-accent, var(--accent));
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.25), 0 0 26px color-mix(in srgb, var(--card-accent, var(--accent)) 45%, transparent);
+}
+
+.contact-social-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  color: var(--card-accent, var(--accent));
+  transition: transform 0.35s ease;
+}
+
+.contact-social-icon svg {
+  width: 26px;
+  height: 26px;
+}
+
+.contact-social-card:hover .contact-social-icon {
+  transform: scale(1.15) rotate(8deg);
+}
+
+.contact-social-title {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text);
+  letter-spacing: 0.03em;
+}
+
+@media (max-width:600px) {
+  .contact-container {
+    padding: 40px 20px;
+    border-radius: 20px;
+  }
+
+  .contact-social-grid {
+    gap: 12px;
+  }
+
+  .contact-social-card {
+    width: calc(50% - 12px);
+  }
+}
+
+/* ---------- BOOT SCREEN: code initialization intro ---------- */
+.boot-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  background: var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.6s ease, transform 0.6s ease;
+}
+
+.boot-screen.boot-hide {
+  opacity: 0;
+  transform: scale(0.98);
+  pointer-events: none;
+}
+
+.boot-screen.boot-skip-instant {
+  display: none;
+}
+
+.boot-scanlines {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(to bottom, rgba(255, 255, 255, 0.02) 0px, rgba(255, 255, 255, 0.02) 1px, transparent 1px, transparent 3px);
+}
+
+.boot-panel {
+  position: relative;
+  width: min(620px, 92vw);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 40px 100px rgba(0, 0, 0, 0.6), 0 0 60px var(--accent-soft);
+  overflow: hidden;
+}
+
+.boot-panel-titlebar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.boot-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.boot-dot.red {
+  background: #FF5F57;
+}
+
+.boot-dot.yellow {
+  background: #FEBC2E;
+}
+
+.boot-dot.green {
+  background: #28C840;
+}
+
+.boot-panel-title {
+  margin-left: 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.boot-lines {
+  padding: 22px 24px;
+  min-height: 220px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.9;
+  color: var(--text);
+}
+
+.boot-line {
+  opacity: 0;
+  white-space: pre-wrap;
+  transition: opacity 0.15s ease;
+}
+
+.boot-line.boot-line-in {
+  opacity: 1;
+}
+
+.boot-line-num {
+  color: var(--muted-2);
+  margin-right: 10px;
+}
+
+.boot-verify {
+  color: var(--accent-2);
+}
+
+.boot-success {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.boot-check {
+  margin-right: 6px;
+}
+
+.boot-footer {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 24px;
+  border-top: 1px solid var(--border);
+}
+
+.boot-progress-track {
+  flex: 1;
+  height: 6px;
+  border-radius: 100px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.boot-progress-fill {
+  height: 100%;
+  border-radius: 100px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  width: 0%;
+  transition: width 0.25s ease;
+}
+
+.boot-progress-pct {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--muted);
+  min-width: 38px;
+  text-align: right;
+}
+
+.boot-skip {
+  position: absolute;
+  bottom: 24px;
+  right: 24px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  padding: 8px 14px;
+  border-radius: 100px;
+  cursor: pointer;
+  transition: border-color 0.2s ease, color 0.2s ease;
+}
+
+.boot-skip:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+@media (max-width:480px) {
+  .boot-lines {
+    padding: 16px 18px;
+    font-size: 11.5px;
+    min-height: 180px;
+  }
+
+  .boot-panel-title {
+    font-size: 10px;
+  }
+
+  .boot-skip {
+    bottom: 14px;
+    right: 14px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .boot-screen {
+    transition: none;
+  }
 }

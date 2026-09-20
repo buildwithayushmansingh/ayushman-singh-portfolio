@@ -59,7 +59,9 @@ def certificates():
 
 @app.route('/github')
 def github():
-    return render_template('section.html', section='github', section_label='GitHub Activity', sections=SECTIONS)
+    today_feed = xp_engine.get_activity_feed(category='github', date_range='today')
+    return render_template('section.html', section='github', section_label='GitHub Activity',
+                            sections=SECTIONS, today_feed=today_feed)
 @app.route('/contact')
 def contact():
     return render_template('section.html', section='contact', section_label='Contact', sections=SECTIONS)

@@ -37,5 +37,42 @@
         <div class="stat-label">Technologies</div>
       </div>
     </div>
+        <h3 class="gh-subhead">Today's activity</h3>
+    <div class="activity-feed reveal-on-scroll">
+      {% for item in today_feed %}
+        <details class="activity-item">
+          <summary class="activity-summary">
+            <span class="activity-icon">{{ item.icon }}</span>
+            <div class="activity-body">
+              <div class="activity-label">{{ item.label }}</div>
+              <div class="activity-desc">{{ item.description }}</div>
+            </div>
+            <div class="activity-meta">
+              <span class="activity-xp">+{{ item.xp }} XP</span>
+              <span class="activity-time">{{ item.relative_time }}</span>
+            </div>
+          </summary>
+          <div class="activity-detail">
+            {% if item.detail and item.detail.commits %}
+              <p class="activity-detail-label">Commits in this push:</p>
+              <ul class="activity-commit-list">
+                {% for c in item.detail.commits %}
+                  <li><a href="{{ c.url }}" target="_blank" rel="noopener">{{ c.sha }}</a> — {{ c.message }}</li>
+                {% endfor %}
+              </ul>
+            {% elif item.detail and item.detail.title %}
+              <p><a href="{{ item.detail.url }}" target="_blank" rel="noopener">{{ item.detail.title }} →</a></p>
+            {% elif item.detail and item.detail.repo_url %}
+              <p><a href="{{ item.detail.repo_url }}" target="_blank" rel="noopener">View repository →</a></p>
+            {% endif %}
+            {% if item.repository %}
+              <p class="activity-detail-repo">Repository: <strong>{{ item.repository }}</strong></p>
+            {% endif %}
+          </div>
+        </details>
+      {% else %}
+        <div class="activity-empty">No GitHub activity yet today.</div>
+      {% endfor %}
+    </div>
   </div>
 </section>

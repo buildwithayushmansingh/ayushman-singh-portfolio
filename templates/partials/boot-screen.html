@@ -1,0 +1,28 @@
+<!-- code boot / system initialization screen — plays once per browser tab session -->
+<div id="bootScreen" class="boot-screen" aria-hidden="true">
+  <div class="boot-scanlines"></div>
+  <div class="boot-panel">
+    <div class="boot-panel-titlebar">
+      <span class="boot-dot red"></span><span class="boot-dot yellow"></span><span class="boot-dot green"></span>
+      <span class="boot-panel-title">PORTFOLIO BOOT SEQUENCE</span>
+    </div>
+    <div class="boot-lines" id="bootLines"></div>
+    <div class="boot-footer">
+      <div class="boot-progress-track"><div class="boot-progress-fill" id="bootProgressFill"></div></div>
+      <span class="boot-progress-pct" id="bootProgressPct">0%</span>
+    </div>
+  </div>
+  <button type="button" class="boot-skip" id="bootSkip">Skip intro →</button>
+</div>
+
+<script>
+  // runs immediately, before the rest of the page paints — prevents any
+  // flash of the boot screen on repeat page loads within the same tab
+  (function () {
+    if (sessionStorage.getItem('bootPlayed') === 'true') {
+      document.getElementById('bootScreen').classList.add('boot-skip-instant');
+    } else {
+      sessionStorage.setItem('bootPlayed', 'true');
+    }
+  })();
+</script>

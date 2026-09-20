@@ -702,3 +702,111 @@ document.querySelectorAll('a, button').forEach(el => {
     });
   }
 })();
+// ---------- Boot screen: code initialization intro ----------
+(function () {
+  const screen = document.getElementById('bootScreen');
+  if (!screen || screen.classList.contains('boot-skip-instant')) return;
+
+  const linesEl = document.getElementById('bootLines');
+  const fillEl = document.getElementById('bootProgressFill');
+  const pctEl = document.getElementById('bootProgressPct');
+  const skipBtn = document.getElementById('bootSkip');
+
+  // reflects this actual portfolio's real features — nothing invented
+  const BOOT_LINES = [
+    'Initializing developer environment...',
+    'Loading theme engine...',
+    'Mounting developer identity...',
+    'Connecting to GitHub...',
+    'Loading projects...',
+    'Indexing certificates...',
+    'Starting command terminal...',
+    'Preparing interface audio...',
+    'Compiling contact channel...',
+    'Verifying configuration...'
+  ];
+
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  function finish() {
+    screen.classList.add('boot-hide');
+    setTimeout(() => { screen.style.display = 'none'; }, 650);
+  }
+
+  if (reduceMotion) {
+    finish(); // respect reduced motion — skip straight to Home, no flashing sequence
+    return;
+  }
+
+  let lineIndex = 0;
+  const totalSteps = BOOT_LINES.length + 2; // + verify + success steps
+
+  function updateProgress(step) {
+    const pct = Math.min(Math.round((step / totalSteps) * 100), 100);
+    fillEl.style.width = pct + '%';
+    pctEl.textContent = pct + '%';
+  }
+
+  function typeLine(text, num, onDone) {
+    const row = document.createElement('div');
+    row.className = 'boot-line';
+    const numSpan = document.createElement('span');
+    numSpan.className = 'boot-line-num';
+    numSpan.textContent = String(num).padStart(2, '0');
+    const textSpan = document.createElement('span');
+    row.appendChild(numSpan);
+    row.appendChild(textSpan);
+    linesEl.appendChild(row);
+    requestAnimationFrame(() => row.classList.add('boot-line-in'));
+
+    let i = 0;
+    const speed = 9; // ms per character — fast, fits the ~5s total budget
+    const interval = setInterval(() => {
+      textSpan.textContent = text.slice(0, i + 1);
+      i++;
+      if (i >= text.length) {
+        clearInterval(interval);
+        onDone();
+      }
+    }, speed);
+  }
+
+  function runNext() {
+    if (lineIndex >= BOOT_LINES.length) {
+      showVerification();
+      return;
+    }
+    updateProgress(lineIndex);
+    typeLine(BOOT_LINES[lineIndex], lineIndex + 1, () => {
+      lineIndex++;
+      setTimeout(runNext, 40);
+    });
+  }
+
+  function showVerification() {
+    updateProgress(BOOT_LINES.length);
+    const row = document.createElement('div');
+    row.className = 'boot-line boot-verify';
+    row.textContent = 'Verifying portfolio...';
+    linesEl.appendChild(row);
+    requestAnimationFrame(() => row.classList.add('boot-line-in'));
+    setTimeout(showSuccess, 350);
+  }
+
+  function showSuccess() {
+    updateProgress(BOOT_LINES.length + 1);
+    const row = document.createElement('div');
+    row.className = 'boot-line boot-success';
+    row.innerHTML = '<span class="boot-check">✓</span>Access granted — initialization complete';
+    linesEl.appendChild(row);
+    requestAnimationFrame(() => row.classList.add('boot-line-in'));
+    setTimeout(finish, 500);
+  }
+
+  skipBtn.addEventListener('click', finish);
+  skipBtn.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); finish(); }
+  });
+
+  runNext();
+})();
