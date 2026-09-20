@@ -810,3 +810,44 @@ document.querySelectorAll('a, button').forEach(el => {
 
   runNext();
 })();
+// ---------- Fast typewriter effect for main headings ----------
+(function () {
+  const targets = document.querySelectorAll('.type-target');
+  if (!targets.length) return;
+
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  targets.forEach(el => {
+    const text = el.innerText; // preserves <br> as a line break
+    if (reduceMotion) {
+      el.classList.remove('color-hidden');
+      el.style.color = '';
+      return;
+    }
+
+    const lines = text.split('\n');
+    el.textContent = '';
+    el.style.color = ''; // reveal as characters are typed in
+
+    let li = 0, ci = 0;
+    const speed = 35; // ms per character — fast, ~2-3s for these headings
+
+    function step() {
+      if (li >= lines.length) return;
+      const line = lines[li];
+      if (ci < line.length) {
+        el.append(line[ci]);
+        ci++;
+        setTimeout(step, speed);
+      } else {
+        li++;
+        ci = 0;
+        if (li < lines.length) {
+          el.append(document.createElement('br'));
+          setTimeout(step, speed);
+        }
+      }
+    }
+    step();
+  });
+})();

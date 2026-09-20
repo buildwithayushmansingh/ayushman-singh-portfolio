@@ -58,27 +58,23 @@
         <a href="https://github.com/buildwithayushmansingh" target="_blank" rel="noopener" class="btn btn-ghost" data-cursor-text="Open">View GitHub</a>
       </div>
       <div class="hero-stats reveal" style="animation-delay:0.44s">
-        <div class="hud-stat">
+        <a href="{{ url_for('about') }}" class="hud-stat" data-cursor-text="Open">
           <div class="stat-num">2nd</div>
           <div class="stat-label">Year, B.Tech CS</div>
-        </div>
-        <div class="hud-stat">
+        </a>
+        <a href="{{ url_for('skills') }}" class="hud-stat" data-cursor-text="Open">
           <div class="stat-num"><span data-count="10">0</span><span class="plus">+</span></div>
           <div class="stat-label">Technologies &amp; tools</div>
-        </div>
-        <div class="hud-stat">
+        </a>
+        <a href="{{ url_for('projects') }}" class="hud-stat" data-cursor-text="Open">
           <div class="stat-num"><span data-count="4">0</span></div>
           <div class="stat-label">Projects built</div>
-        </div>
-        <div class="hud-stat">
-          <div class="stat-num"><span data-count="2">0</span></div>
+        </a>
+        <a href="{{ url_for('certificates') }}" class="hud-stat" data-cursor-text="Open">
+          <div class="stat-num"><span data-count="4">0</span></div>
           <div class="stat-label">Certifications earned</div>
-        </div>
+        </a>
       </div>
-      <a href="{{ url_for('about') }}" class="scroll-cue reveal" style="animation-delay:0.5s">
-        <span>Continue to About</span>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-      </a>
     </div>
     <div class="hero-visual reveal" style="animation-delay:0.15s">
       <div class="hero-orbit" aria-hidden="true">

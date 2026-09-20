@@ -645,14 +645,20 @@ section {
 }
 
 .hud-stat {
-  position: relative;
-  padding: 14px 16px 14px 0;
-  border-top: 1px solid var(--border);
+  text-decoration: none;
+  display: block;
+  cursor: pointer;
+  transition: transform 0.2s ease, border-color 0.2s ease;
+}
+
+.hud-stat:hover {
+  transform: translateY(-3px);
+  border-color: var(--accent);
 }
 
 .hud-stat::before,
 .hud-stat::after {
-  content: '';
+  /* content: ''; */
   position: absolute;
   top: -1px;
   width: 8px;
