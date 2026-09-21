@@ -1,0 +1,30 @@
+<!-- AI portfolio assistant — floating button + panel (Phase 1: UI shell only, no backend yet) -->
+<button type="button" class="ai-fab" id="aiFab" aria-haspopup="dialog" aria-expanded="false" aria-label="Open portfolio AI assistant" data-cursor-text="Ask AI">
+  <span class="ai-fab-icon">🤖</span>
+  <span class="ai-fab-label">Ask AI</span>
+</button>
+
+<div class="ai-panel" id="aiPanel" role="dialog" aria-modal="false" aria-label="Portfolio AI assistant" hidden>
+  <div class="ai-panel-header">
+    <span class="ai-panel-title">🤖 Portfolio AI</span>
+    <button type="button" class="ai-panel-close" id="aiPanelClose" aria-label="Close AI assistant">×</button>
+  </div>
+
+  <div class="ai-panel-body" id="aiPanelBody">
+    <div class="ai-msg ai-msg-bot">
+      Hi! I'm your portfolio assistant.<br>
+      Ask me anything about the developer, projects, skills, certificates or journey.
+    </div>
+    <div class="ai-suggestions" id="aiSuggestions">
+      <button type="button" class="ai-suggestion-chip">Show my projects</button>
+      <button type="button" class="ai-suggestion-chip">What are my skills?</button>
+      <button type="button" class="ai-suggestion-chip">Show my certificates</button>
+      <button type="button" class="ai-suggestion-chip">Which projects use Flask?</button>
+    </div>
+  </div>
+
+  <form class="ai-panel-input-row" id="aiForm">
+    <input type="text" id="aiInput" class="ai-input" placeholder="Ask something..." autocomplete="off" aria-label="Ask the portfolio AI assistant">
+    <button type="submit" class="ai-send-btn" aria-label="Send">➤</button>
+  </form>
+</div>

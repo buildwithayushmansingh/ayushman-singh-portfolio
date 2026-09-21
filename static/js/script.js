@@ -851,3 +851,75 @@ document.querySelectorAll('a, button').forEach(el => {
     step();
   });
 })();
+// ---------- Portfolio AI assistant (Phase 1: UI shell, no AI backend yet) ----------
+(function () {
+  const fab = document.getElementById('aiFab');
+  const panel = document.getElementById('aiPanel');
+  const closeBtn = document.getElementById('aiPanelClose');
+  const body = document.getElementById('aiPanelBody');
+  const form = document.getElementById('aiForm');
+  const input = document.getElementById('aiInput');
+  const chips = document.querySelectorAll('.ai-suggestion-chip');
+  if (!fab || !panel) return;
+
+  function openPanel() {
+    panel.removeAttribute('hidden');
+    requestAnimationFrame(() => panel.classList.add('ai-panel-open'));
+    fab.classList.add('ai-fab-hidden');
+    fab.setAttribute('aria-expanded', 'true');
+    setTimeout(() => input.focus(), 200);
+  }
+  function closePanel() {
+    panel.classList.remove('ai-panel-open');
+    fab.classList.remove('ai-fab-hidden');
+    fab.setAttribute('aria-expanded', 'false');
+    setTimeout(() => panel.setAttribute('hidden', ''), 250);
+  }
+
+  fab.addEventListener('click', openPanel);
+  closeBtn.addEventListener('click', closePanel);
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && panel.classList.contains('ai-panel-open')) closePanel();
+  });
+
+  function addMessage(text, who) {
+    const msg = document.createElement('div');
+    msg.className = 'ai-msg ' + (who === 'user' ? 'ai-msg-user' : 'ai-msg-bot');
+    msg.textContent = text;
+    body.appendChild(msg);
+    body.scrollTop = body.scrollHeight;
+    return msg;
+  }
+
+  function showTyping() {
+    const typing = document.createElement('div');
+    typing.className = 'ai-msg-typing';
+    typing.innerHTML = '<span></span><span></span><span></span>';
+    body.appendChild(typing);
+    body.scrollTop = body.scrollHeight;
+    return typing;
+  }
+
+  // Phase 1 placeholder — no AI backend wired up yet (that's Phase 3/4).
+  // This proves the whole UI flow works end-to-end before any API is involved.
+  function handleMessage(text) {
+    addMessage(text, 'user');
+    const typing = showTyping();
+    setTimeout(() => {
+      typing.remove();
+      addMessage("I'm not connected to the AI yet — that comes in the next phase! For now, try the About, Skills, Projects and Certificates pages from the menu.", 'bot');
+    }, 900);
+  }
+
+  form.addEventListener('submit', e => {
+    e.preventDefault();
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = '';
+    handleMessage(text);
+  });
+
+  chips.forEach(chip => {
+    chip.addEventListener('click', () => handleMessage(chip.textContent));
+  });
+})();
