@@ -21,7 +21,7 @@
 
 /* ---------- THEME: Light ---------- */
 [data-theme="light"] {
-  --bg: #F6F7FA;
+  --bg: #e0e0e0;
   --bg-alt: #FFFFFF;
   --surface: #FFFFFF;
   --surface-2: #EFF1F5;
@@ -4733,3 +4733,4 @@ footer {
     transition: none;
   }
 }
+
