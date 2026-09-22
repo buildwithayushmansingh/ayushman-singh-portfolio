@@ -1,0 +1,55 @@
+[
+    {
+        "id": "wattwise",
+        "name": "WattWise",
+        "description": "AI-based energy optimization platform that analyzes usage and surfaces insights for cutting unnecessary consumption.",
+        "technologies": [
+            "Python",
+            "Flask",
+            "SQLite",
+            "Chart.js"
+        ],
+        "github": "https://github.com/buildwithayushmansingh",
+        "live": null
+    },
+    {
+        "id": "private-photo-vault",
+        "name": "Private Photo Vault",
+        "description": "Secure photo storage and authentication web application with upload, delete and image-preview functionality.",
+        "technologies": [
+            "Python",
+            "Flask",
+            "SQLite",
+            "HTML",
+            "CSS",
+            "JavaScript"
+        ],
+        "github": "https://github.com/buildwithayushmansingh/private-photo-vault",
+        "live": null
+    },
+    {
+        "id": "genai-project",
+        "name": "GenAI Project",
+        "description": "Exploring practical Generative AI use, built to test how far intelligent, useful applications can go with the tech.",
+        "technologies": [
+            "Python",
+            "Generative AI"
+        ],
+        "github": "https://github.com/buildwithayushmansingh/genai-project",
+        "live": null
+    },
+    {
+        "id": "personal-portfolio",
+        "name": "Personal Portfolio",
+        "description": "Modern, interactive developer portfolio with theming, a Developer ID/XP system, live GitHub activity, and this AI agent.",
+        "technologies": [
+            "HTML",
+            "CSS",
+            "JavaScript",
+            "Python",
+            "Flask"
+        ],
+        "github": null,
+        "live": null
+    }
+]

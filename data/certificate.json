@@ -1,0 +1,30 @@
+[
+    {
+        "id": "gold-eda",
+        "name": "Gold Certificate — Exploratory Data Analysis",
+        "issuer": "FutureSkills Prime × NASSCOM",
+        "detail": "Gold Category, 70%+ score",
+        "image": "gold-certificate.png"
+    },
+    {
+        "id": "course-completion-eda",
+        "name": "Exploratory Data Analysis — Course Participation",
+        "issuer": "FutureSkills Prime × NASSCOM",
+        "detail": null,
+        "image": "course-completion-certificate.png"
+    },
+    {
+        "id": "google-genai",
+        "name": "Introduction to Generative AI",
+        "issuer": "Google Cloud, via Simplilearn SkillUp",
+        "detail": null,
+        "image": "google-certificate.png"
+    },
+    {
+        "id": "nexus-quiz-ignite",
+        "name": "NEXUS AI Quiz Ignite 2026",
+        "issuer": "Unstop",
+        "detail": "Certificate of Participation",
+        "image": "nexus-participation.jpg"
+    }
+]

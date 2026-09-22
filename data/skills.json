@@ -1,0 +1,52 @@
+[
+    {
+        "category": "Frontend development",
+        "skills": [
+            "HTML",
+            "CSS",
+            "JavaScript",
+            "Responsive UI"
+        ]
+    },
+    {
+        "category": "Backend development",
+        "skills": [
+            "Python",
+            "Flask",
+            "REST APIs"
+        ]
+    },
+    {
+        "category": "Database",
+        "skills": [
+            "MySQL",
+            "SQLite"
+        ]
+    },
+    {
+        "category": "AI & data",
+        "skills": [
+            "Generative AI",
+            "Data analysis",
+            "AI-powered applications"
+        ]
+    },
+    {
+        "category": "Development tools",
+        "skills": [
+            "Git",
+            "GitHub",
+            "VS Code",
+            "Render"
+        ]
+    },
+    {
+        "category": "UI/UX & interactive web",
+        "skills": [
+            "Modern interfaces",
+            "Animations",
+            "Dashboards",
+            "Interactive web experiences"
+        ]
+    }
+]
