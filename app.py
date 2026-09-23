@@ -1,6 +1,7 @@
-from flask import Flask, render_template, request
+from flask import Flask, render_template, request, jsonify
 import xp_engine
 import github_sync
+import ai.agent as ai_agent
 
 app = Flask(__name__)
 
@@ -66,7 +67,24 @@ def github():
 def contact():
     return render_template('section.html', section='contact', section_label='Contact', sections=SECTIONS)
 
+@app.route('/api/ai', methods=['POST'])
+def api_ai():
+    """Portfolio AI Agent endpoint. Phase 3: answers from real portfolio
+    data only — no external AI provider yet (that's Phase 4)."""
+    data = request.get_json(silent=True) or {}
+    message = (data.get('message') or '').strip()
 
+    if not message:
+        return jsonify({'error': 'Please enter a message.'}), 400
+    if len(message) > 500:
+        return jsonify({'error': 'That message is too long — please keep it under 500 characters.'}), 400
+
+    try:
+        result = ai_agent.generate_response(message)
+        return jsonify(result)
+    except Exception:
+        # never leak a Python traceback to visitors
+        return jsonify({'error': 'AI assistant is temporarily unavailable. Please try again.'}), 500
 # real, developer-configurable status shown on the ID card — not automatic
 # real, developer-configurable status shown on the ID card — not automatic
 DEV_STATUS = 'OPEN TO WORK'
