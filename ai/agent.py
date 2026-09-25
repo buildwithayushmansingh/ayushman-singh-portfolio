@@ -7,7 +7,52 @@ whole request -> response -> frontend pipeline is real and testable
 before an external AI provider is wired in.
 """
 
+import os
+import json
 from ai import knowledge
+from ai.prompts import SYSTEM_INSTRUCTION
+
+_gemini_model = None
+
+
+def _get_gemini_model():
+    """Lazily creates the Gemini client. Returns None (silently) if no
+    API key is configured — the agent then just falls back to the
+    rule-based answers from Phase 3, so the feature degrades gracefully
+    instead of breaking when GEMINI_API_KEY isn't set."""
+    global _gemini_model
+    if _gemini_model is not None:
+        return _gemini_model
+    api_key = os.environ.get('GEMINI_API_KEY')
+    if not api_key:
+        return None
+    import google.generativeai as genai
+    genai.configure(api_key=api_key)
+    _gemini_model = genai.GenerativeModel('gemini-1.5-flash')
+    return _gemini_model
+
+
+def _build_context():
+    """Everything the AI is allowed to know — nothing more."""
+    return json.dumps({
+        'profile': knowledge.get_profile(),
+        'education': knowledge.get_education(),
+        'skills': knowledge.get_skills(),
+        'projects': knowledge.get_projects(),
+        'certificates': knowledge.get_certificates(),
+    }, indent=2)
+
+
+def _ask_ai(message):
+    model = _get_gemini_model()
+    if not model:
+        return None
+    prompt = SYSTEM_INSTRUCTION.format(context=_build_context()) + f"\n\nVisitor question: {message}"
+    try:
+        response = model.generate_content(prompt)
+        return {'message': response.text.strip()}
+    except Exception:
+        return None  # network/quota error — caller falls back gracefully
 
 
 def generate_response(message):
@@ -64,6 +109,12 @@ def generate_response(message):
     if 'contact' in text or 'email' in text or 'hire' in text:
         profile = knowledge.get_profile()
         return {'message': f"You can reach out at {profile['email']} or connect on LinkedIn: {profile['linkedin']}."}
+
+    # nothing matched a known rule — let the real AI take a shot, still
+    # grounded strictly in the portfolio data above
+    ai_result = _ask_ai(message)
+    if ai_result:
+        return ai_result
 
     return {
         'message': "I couldn't find that information in my portfolio yet. Try asking about my projects, skills, certificates, or education.",
