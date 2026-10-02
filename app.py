@@ -1,4 +1,9 @@
+import time
 from flask import Flask, render_template, request, jsonify
+from dotenv import load_dotenv
+
+load_dotenv()
+
 import xp_engine
 import github_sync
 import ai.agent as ai_agent
@@ -66,13 +71,32 @@ def github():
 @app.route('/contact')
 def contact():
     return render_template('section.html', section='contact', section_label='Contact', sections=SECTIONS)
+# ---- simple in-memory rate limit for /api/ai (per IP) ----
+_AI_RATE = {}
+AI_LIMIT, AI_WINDOW = 15, 60  # 15 requests / 60s
+
+
+def _rate_limited(ip):
+    now = time.time()
+    hits = [t for t in _AI_RATE.get(ip, []) if now - t < AI_WINDOW]
+    if len(hits) >= AI_LIMIT:
+        _AI_RATE[ip] = hits
+        return True
+    hits.append(now)
+    _AI_RATE[ip] = hits
+    return False
+
 
 @app.route('/api/ai', methods=['POST'])
 def api_ai():
-    """Portfolio AI Agent endpoint. Phase 3: answers from real portfolio
-    data only — no external AI provider yet (that's Phase 4)."""
+    """Portfolio AI Agent endpoint: rule-based intents first, Gemini fallback."""
+    ip = request.headers.get('X-Forwarded-For', request.remote_addr or 'unknown').split(',')[0].strip()
+    if _rate_limited(ip):
+        return jsonify({'error': 'Too many messages — please wait a moment and try again.'}), 429
+
     data = request.get_json(silent=True) or {}
     message = (data.get('message') or '').strip()
+    history = data.get('history') if isinstance(data.get('history'), list) else []
 
     if not message:
         return jsonify({'error': 'Please enter a message.'}), 400
@@ -80,10 +104,10 @@ def api_ai():
         return jsonify({'error': 'That message is too long — please keep it under 500 characters.'}), 400
 
     try:
-        result = ai_agent.generate_response(message)
-        return jsonify(result)
+        return jsonify(ai_agent.generate_response(message, history))
     except Exception:
-        # never leak a Python traceback to visitors
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': 'AI assistant is temporarily unavailable. Please try again.'}), 500
 # real, developer-configurable status shown on the ID card — not automatic
 # real, developer-configurable status shown on the ID card — not automatic

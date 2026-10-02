@@ -851,7 +851,7 @@ document.querySelectorAll('a, button').forEach(el => {
     step();
   });
 })();
-// ---------- Portfolio AI assistant (Phase 1: UI shell, no AI backend yet) ----------
+// ---------- Portfolio AI assistant ----------
 (function () {
   const fab = document.getElementById('aiFab');
   const panel = document.getElementById('aiPanel');
@@ -859,8 +859,25 @@ document.querySelectorAll('a, button').forEach(el => {
   const body = document.getElementById('aiPanelBody');
   const form = document.getElementById('aiForm');
   const input = document.getElementById('aiInput');
-  const chips = document.querySelectorAll('.ai-suggestion-chip');
+  const sendBtn = form ? form.querySelector('.ai-send-btn') : null;
+  const suggestions = document.getElementById('aiSuggestions');
   if (!fab || !panel) return;
+
+  const STORAGE_KEY = 'portfolioAiChat';
+  const PAGES = {
+    show_projects: ['/projects', 'View projects page'],
+    filter_projects: ['/projects', 'View projects page'],
+    show_skills: ['/skills', 'View skills page'],
+    show_certificates: ['/certificates', 'View certificates page'],
+    show_contact: ['/contact', 'Go to contact page'],
+    show_about: ['/about', 'Read the About page']
+  };
+  let history = [];
+  let busy = false;
+
+  function save() {
+    try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(history.slice(-20))); } catch (e) { }
+  }
 
   function openPanel() {
     panel.removeAttribute('hidden');
@@ -882,13 +899,46 @@ document.querySelectorAll('a, button').forEach(el => {
     if (e.key === 'Escape' && panel.classList.contains('ai-panel-open')) closePanel();
   });
 
-  function addMessage(text, who) {
+  // turn URLs / emails in bot text into safe clickable links (no innerHTML)
+  function renderText(el, text) {
+    const re = /(https?:\/\/[^\s,)]+|[\w.+-]+@[\w-]+\.[\w.-]+)/g;
+    let last = 0, m;
+    while ((m = re.exec(text)) !== null) {
+      el.appendChild(document.createTextNode(text.slice(last, m.index)));
+      const a = document.createElement('a');
+      a.className = 'ai-link';
+      a.textContent = m[0];
+      a.href = m[0].includes('@') && !m[0].startsWith('http') ? 'mailto:' + m[0] : m[0];
+      if (a.href.startsWith('http')) { a.target = '_blank'; a.rel = 'noopener'; }
+      el.appendChild(a);
+      last = m.index + m[0].length;
+    }
+    el.appendChild(document.createTextNode(text.slice(last)));
+  }
+
+  function addMessage(text, who, extra) {
     const msg = document.createElement('div');
     msg.className = 'ai-msg ' + (who === 'user' ? 'ai-msg-user' : 'ai-msg-bot');
-    msg.textContent = text;
+    if (who === 'user') msg.textContent = text; else renderText(msg, text);
+    if (extra && extra.className) msg.classList.add(extra.className);
     body.appendChild(msg);
     body.scrollTop = body.scrollHeight;
     return msg;
+  }
+
+  function addActionButton(msg, action, tech, projectIds) {
+    const page = PAGES[action];
+    if (!page) return;
+    const btn = document.createElement('a');
+    btn.className = 'ai-action-btn';
+    let href = page[0];
+    if (action === 'filter_projects' && projectIds && projectIds.length) {
+      href += '?highlight=' + encodeURIComponent(projectIds.join(',')) + '&tech=' + encodeURIComponent(tech || '');
+    }
+    btn.href = href;
+    btn.textContent = page[1] + ' →';
+    msg.appendChild(document.createElement('br'));
+    msg.appendChild(btn);
   }
 
   function showTyping() {
@@ -900,15 +950,50 @@ document.querySelectorAll('a, button').forEach(el => {
     return typing;
   }
 
-  // Phase 1 placeholder — no AI backend wired up yet (that's Phase 3/4).
-  // This proves the whole UI flow works end-to-end before any API is involved.
-  function handleMessage(text) {
+  function setBusy(state) {
+    busy = state;
+    input.disabled = state;
+    if (sendBtn) sendBtn.disabled = state;
+    if (!state) input.focus();
+  }
+
+  async function handleMessage(text) {
+    if (busy) return;
+    if (suggestions) suggestions.remove();
     addMessage(text, 'user');
+    const priorHistory = history.slice(-12);
+    history.push({ role: 'user', content: text });
+    setBusy(true);
     const typing = showTyping();
-    setTimeout(() => {
+
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 25000);
+      const res = await fetch('/api/ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text, history: priorHistory }),
+        signal: controller.signal
+      });
+      clearTimeout(timer);
+      const data = await res.json().catch(() => ({}));
       typing.remove();
-      addMessage("I'm not connected to the AI yet — that comes in the next phase! For now, try the About, Skills, Projects and Certificates pages from the menu.", 'bot');
-    }, 900);
+
+      if (!res.ok || data.error) {
+        addMessage(data.error || 'Something went wrong. Please try again.', 'bot', { className: 'ai-msg-error' });
+      } else {
+        const msg = addMessage(data.message || 'No response.', 'bot');
+        addActionButton(msg, data.action, data.technology, data.projects);
+        history.push({ role: 'assistant', content: data.message || '' });
+        save();
+      }
+    } catch (err) {
+      typing.remove();
+      const timedOut = err && err.name === 'AbortError';
+      addMessage(timedOut ? 'That took too long — please try again.' : "Couldn't reach the server. Check your connection and try again.", 'bot', { className: 'ai-msg-error' });
+    } finally {
+      setBusy(false);
+    }
   }
 
   form.addEventListener('submit', e => {
@@ -919,7 +1004,34 @@ document.querySelectorAll('a, button').forEach(el => {
     handleMessage(text);
   });
 
-  chips.forEach(chip => {
+  document.querySelectorAll('.ai-suggestion-chip').forEach(chip => {
     chip.addEventListener('click', () => handleMessage(chip.textContent));
   });
+
+  // restore chat after navigating between pages
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(STORAGE_KEY) || '[]');
+    if (saved.length) {
+      history = saved;
+      if (suggestions) suggestions.remove();
+      saved.forEach(t => addMessage(t.content, t.role === 'user' ? 'user' : 'bot'));
+    }
+  } catch (e) { }
+
+  // clear-chat button
+  const clearBtn = document.getElementById('aiPanelClear');
+  if (clearBtn) clearBtn.addEventListener('click', () => {
+    history = [];
+    try { sessionStorage.removeItem(STORAGE_KEY); } catch (e) { }
+    body.querySelectorAll('.ai-msg:not(:first-child), .ai-msg-typing').forEach(n => n.remove());
+  });
+
+  // projects page: highlight cards the AI pointed at (?highlight=id1,id2)
+  const params = new URLSearchParams(location.search);
+  const highlight = (params.get('highlight') || '').split(',').filter(Boolean);
+  if (highlight.length) {
+    document.querySelectorAll('.orbit-card[data-project-id]').forEach(card => {
+      card.classList.add(highlight.includes(card.dataset.projectId) ? 'ai-highlight' : 'ai-dimmed');
+    });
+  }
 })();
