@@ -851,34 +851,37 @@ document.querySelectorAll('a, button').forEach(el => {
     step();
   });
 })();
-// ---------- Portfolio AI assistant ----------
+// ---------- Portfolio AI assistant (advanced: streaming, rich cards, actions, voice, feedback) ----------
 (function () {
   const fab = document.getElementById('aiFab');
   const panel = document.getElementById('aiPanel');
   const closeBtn = document.getElementById('aiPanelClose');
+  const clearBtn = document.getElementById('aiPanelClear');
   const body = document.getElementById('aiPanelBody');
   const form = document.getElementById('aiForm');
   const input = document.getElementById('aiInput');
   const sendBtn = form ? form.querySelector('.ai-send-btn') : null;
-  const suggestions = document.getElementById('aiSuggestions');
+  const micBtn = document.getElementById('aiMic');
+  const counter = document.getElementById('aiCounter');
   if (!fab || !panel) return;
 
   const STORAGE_KEY = 'portfolioAiChat';
-  const PAGES = {
-    show_projects: ['/projects', 'View projects page'],
-    filter_projects: ['/projects', 'View projects page'],
-    show_skills: ['/skills', 'View skills page'],
-    show_certificates: ['/certificates', 'View certificates page'],
-    show_contact: ['/contact', 'Go to contact page'],
-    show_about: ['/about', 'Read the About page']
-  };
-  let history = [];
+  const DEFAULT_CHIPS = ['Show my projects', 'Which projects use Flask?', 'Why should I hire Ayushman?', "What's your Developer level?", 'Switch to light theme'];
+  let history = [];   // [{role, content, meta?}]  (meta = cards/link/suggestions/id for restore)
   let busy = false;
 
-  function save() {
-    try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(history.slice(-20))); } catch (e) { }
-  }
+  const el = (tag, cls, txt) => {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (txt != null) n.textContent = txt;
+    return n;
+  };
+  const scrollDown = () => { body.scrollTop = body.scrollHeight; };
+  const save = () => {
+    try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(history.slice(-24))); } catch (e) { }
+  };
 
+  /* ---------- open / close ---------- */
   function openPanel() {
     panel.removeAttribute('hidden');
     requestAnimationFrame(() => panel.classList.add('ai-panel-open'));
@@ -892,106 +895,264 @@ document.querySelectorAll('a, button').forEach(el => {
     fab.setAttribute('aria-expanded', 'false');
     setTimeout(() => panel.setAttribute('hidden', ''), 250);
   }
-
   fab.addEventListener('click', openPanel);
   closeBtn.addEventListener('click', closePanel);
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape' && panel.classList.contains('ai-panel-open')) closePanel();
+    const isOpen = panel.classList.contains('ai-panel-open');
+    if (e.key === 'Escape' && isOpen) closePanel();
+    if ((e.ctrlKey || e.metaKey) && e.key === '/') { e.preventDefault(); isOpen ? closePanel() : openPanel(); }
   });
 
-  // turn URLs / emails in bot text into safe clickable links (no innerHTML)
-  function renderText(el, text) {
-    const re = /(https?:\/\/[^\s,)]+|[\w.+-]+@[\w-]+\.[\w.-]+)/g;
+  /* ---------- safe markdown-lite renderer (bold, `code`, bullets, links) ---------- */
+  const INLINE = /(\*\*[^*]+\*\*|`[^`]+`|https?:\/\/[^\s,)]+|[\w.+-]+@[\w-]+\.[\w.-]+)/g;
+  function renderInline(parent, text) {
     let last = 0, m;
-    while ((m = re.exec(text)) !== null) {
-      el.appendChild(document.createTextNode(text.slice(last, m.index)));
-      const a = document.createElement('a');
-      a.className = 'ai-link';
-      a.textContent = m[0];
-      a.href = m[0].includes('@') && !m[0].startsWith('http') ? 'mailto:' + m[0] : m[0];
-      if (a.href.startsWith('http')) { a.target = '_blank'; a.rel = 'noopener'; }
-      el.appendChild(a);
-      last = m.index + m[0].length;
+    INLINE.lastIndex = 0;
+    while ((m = INLINE.exec(text)) !== null) {
+      if (m.index > last) parent.appendChild(document.createTextNode(text.slice(last, m.index)));
+      const tok = m[0];
+      if (tok.startsWith('**')) parent.appendChild(el('strong', null, tok.slice(2, -2)));
+      else if (tok.startsWith('`')) parent.appendChild(el('code', null, tok.slice(1, -1)));
+      else {
+        const a = el('a', 'ai-link', tok);
+        const isUrl = /^https?:/.test(tok);
+        a.href = isUrl ? tok : 'mailto:' + tok;
+        if (isUrl) { a.target = '_blank'; a.rel = 'noopener noreferrer'; }
+        parent.appendChild(a);
+      }
+      last = m.index + tok.length;
     }
-    el.appendChild(document.createTextNode(text.slice(last)));
+    if (last < text.length) parent.appendChild(document.createTextNode(text.slice(last)));
+  }
+  function renderRich(target, text) {
+    target.textContent = '';
+    let list = null;
+    text.split('\n').forEach(line => {
+      const bullet = line.match(/^\s*[-*•]\s+(.*)/);
+      if (bullet) {
+        if (!list) { list = el('ul', 'ai-list'); target.appendChild(list); }
+        const li = el('li'); renderInline(li, bullet[1]); list.appendChild(li);
+      } else {
+        list = null;
+        if (line.trim() === '') return;
+        const p = el('p'); renderInline(p, line); target.appendChild(p);
+      }
+    });
   }
 
-  function addMessage(text, who, extra) {
-    const msg = document.createElement('div');
-    msg.className = 'ai-msg ' + (who === 'user' ? 'ai-msg-user' : 'ai-msg-bot');
-    if (who === 'user') msg.textContent = text; else renderText(msg, text);
-    if (extra && extra.className) msg.classList.add(extra.className);
+  /* ---------- rich cards ---------- */
+  function projectCard(p) {
+    const c = el('div', 'ai-card');
+    c.appendChild(el('div', 'ai-card-title', p.name));
+    c.appendChild(el('div', 'ai-card-desc', p.description));
+    const tags = el('div', 'ai-card-tags');
+    (p.technologies || []).forEach(t => tags.appendChild(el('span', 'tag', t)));
+    c.appendChild(tags);
+    if (p.github) {
+      const a = el('a', 'ai-card-link', 'GitHub →');
+      a.href = p.github; a.target = '_blank'; a.rel = 'noopener noreferrer';
+      c.appendChild(a);
+    }
+    return c;
+  }
+  function skillCard(cat) {
+    const c = el('div', 'ai-card');
+    c.appendChild(el('div', 'ai-card-title', cat.category));
+    const tags = el('div', 'ai-card-tags');
+    cat.skills.forEach(s => tags.appendChild(el('span', 'tag', s)));
+    c.appendChild(tags);
+    return c;
+  }
+  function certCard(cert) {
+    const c = el('div', 'ai-card');
+    c.appendChild(el('div', 'ai-card-title', cert.name));
+    c.appendChild(el('div', 'ai-card-desc', cert.issuer + (cert.detail ? ' · ' + cert.detail : '')));
+    return c;
+  }
+  function renderCards(container, cards) {
+    if (!cards || !cards.items) return;
+    const build = { projects: projectCard, skills: skillCard, certificates: certCard }[cards.type];
+    if (!build) return;
+    const wrap = el('div', 'ai-cards');
+    cards.items.forEach(item => wrap.appendChild(build(item)));
+    container.appendChild(wrap);
+  }
+  function renderLink(container, link) {
+    if (!link || !link.url) return;
+    const a = el('a', 'ai-action-btn', link.label + ' →');
+    a.href = link.url;
+    container.appendChild(a);
+  }
+
+  /* ---------- client actions the AI can trigger ---------- */
+  function runAction(action) {
+    if (!action) return;
+    if (action.type === 'set_theme') {
+      const sw = document.querySelector('.theme-swatch[data-theme="' + action.theme + '"]');
+      if (sw) sw.click();
+    } else if (action.type === 'open_terminal') {
+      const trig = document.getElementById('cmdkTrigger');
+      closePanel();
+      setTimeout(() => {
+        if (trig) trig.click();
+        else document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true }));
+      }, 300);
+    }
+  }
+
+  /* ---------- message building ---------- */
+  function userMessage(text) {
+    const m = el('div', 'ai-msg ai-msg-user', text);
+    body.appendChild(m);
+    scrollDown();
+  }
+  function botShell() {
+    const msg = el('div', 'ai-msg ai-msg-bot');
+    const shell = { msg, text: el('div', 'ai-msg-text'), extras: el('div', 'ai-msg-extras'), tools: el('div', 'ai-msg-tools'), raw: '' };
+    msg.append(shell.text, shell.extras, shell.tools);
     body.appendChild(msg);
-    body.scrollTop = body.scrollHeight;
-    return msg;
+    return shell;
+  }
+  function setText(shell, text) { shell.raw = text; renderRich(shell.text, text); scrollDown(); }
+
+  function addTools(shell, chatId) {
+    const copy = el('button', 'ai-tool-btn', '⧉ Copy');
+    copy.type = 'button';
+    copy.addEventListener('click', () => {
+      if (navigator.clipboard) navigator.clipboard.writeText(shell.raw).then(() => {
+        copy.textContent = '✓ Copied'; setTimeout(() => (copy.textContent = '⧉ Copy'), 1500);
+      }).catch(() => { });
+    });
+    shell.tools.appendChild(copy);
+    if (chatId) {
+      [['👍', 1], ['👎', -1]].forEach(([icon, rating]) => {
+        const b = el('button', 'ai-tool-btn', icon);
+        b.type = 'button'; b.setAttribute('aria-label', rating === 1 ? 'Helpful' : 'Not helpful');
+        b.addEventListener('click', () => {
+          fetch('/api/ai/feedback', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: chatId, rating })
+          }).catch(() => { });
+          shell.tools.querySelectorAll('.ai-tool-btn').forEach(x => { if (x !== copy) x.disabled = true; });
+          b.classList.add('active');
+        });
+        shell.tools.appendChild(b);
+      });
+    }
   }
 
-  function addActionButton(msg, action, tech, projectIds) {
-    const page = PAGES[action];
-    if (!page) return;
-    const btn = document.createElement('a');
-    btn.className = 'ai-action-btn';
-    let href = page[0];
-    if (action === 'filter_projects' && projectIds && projectIds.length) {
-      href += '?highlight=' + encodeURIComponent(projectIds.join(',')) + '&tech=' + encodeURIComponent(tech || '');
-    }
-    btn.href = href;
-    btn.textContent = page[1] + ' →';
-    msg.appendChild(document.createElement('br'));
-    msg.appendChild(btn);
+  function showSuggestions(list) {
+    body.querySelectorAll('.ai-suggestions').forEach(n => n.remove());
+    if (!list || !list.length) return;
+    const wrap = el('div', 'ai-suggestions');
+    list.slice(0, 5).forEach(t => {
+      const chip = el('button', 'ai-suggestion-chip', t);
+      chip.type = 'button';
+      chip.addEventListener('click', () => handleMessage(t));
+      wrap.appendChild(chip);
+    });
+    body.appendChild(wrap);
+    scrollDown();
   }
 
   function showTyping() {
-    const typing = document.createElement('div');
-    typing.className = 'ai-msg-typing';
-    typing.innerHTML = '<span></span><span></span><span></span>';
-    body.appendChild(typing);
-    body.scrollTop = body.scrollHeight;
-    return typing;
+    const t = el('div', 'ai-msg-typing');
+    t.innerHTML = '<span></span><span></span><span></span>';
+    body.appendChild(t);
+    scrollDown();
+    return t;
   }
-
   function setBusy(state) {
     busy = state;
     input.disabled = state;
     if (sendBtn) sendBtn.disabled = state;
+    if (micBtn) micBtn.disabled = state;
     if (!state) input.focus();
   }
+  function errorMessage(text) {
+    const m = el('div', 'ai-msg ai-msg-bot ai-msg-error', text);
+    body.appendChild(m);
+    scrollDown();
+  }
 
+  /* ---------- sending (streaming NDJSON) ---------- */
   async function handleMessage(text) {
-    if (busy) return;
-    if (suggestions) suggestions.remove();
-    addMessage(text, 'user');
-    const priorHistory = history.slice(-12);
+    if (busy || !text) return;
+    body.querySelectorAll('.ai-suggestions').forEach(n => n.remove());
+    userMessage(text);
+    const prior = history.slice(-12).map(h => ({ role: h.role, content: h.content }));
     history.push({ role: 'user', content: text });
     setBusy(true);
     const typing = showTyping();
 
-    try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 25000);
-      const res = await fetch('/api/ai', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text, history: priorHistory }),
-        signal: controller.signal
-      });
-      clearTimeout(timer);
-      const data = await res.json().catch(() => ({}));
-      typing.remove();
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 40000);
+    let shell = null, meta = {}, finished = false;
 
-      if (!res.ok || data.error) {
-        addMessage(data.error || 'Something went wrong. Please try again.', 'bot', { className: 'ai-msg-error' });
-      } else {
-        const msg = addMessage(data.message || 'No response.', 'bot');
-        addActionButton(msg, data.action, data.technology, data.projects);
-        history.push({ role: 'assistant', content: data.message || '' });
+    function ensureShell() {
+      if (!shell) { typing.remove(); shell = botShell(); shell.msg.classList.add('ai-streaming'); }
+      return shell;
+    }
+    function onEvent(ev) {
+      if (ev.type === 'meta') {
+        meta = Object.assign(meta, ev.data);
+        const s = ensureShell();
+        if (ev.data.message) setText(s, ev.data.message);
+        renderCards(s.extras, ev.data.cards);
+        renderLink(s.extras, ev.data.link);
+        runAction(ev.data.action);
+      } else if (ev.type === 'delta') {
+        const s = ensureShell();
+        setText(s, s.raw + ev.text);
+      } else if (ev.type === 'done') {
+        finished = true;
+        const s = ensureShell();
+        s.msg.classList.remove('ai-streaming');
+        const id = ev.data && ev.data.id;
+        addTools(s, id);
+        history.push({
+          role: 'assistant', content: s.raw,
+          meta: { cards: meta.cards, link: meta.link, suggestions: meta.suggestions, id }
+        });
         save();
+        showSuggestions(meta.suggestions);
+      } else if (ev.type === 'error') {
+        throw new Error(ev.error);
       }
+    }
+
+    try {
+      const res = await fetch('/api/ai/stream', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text, history: prior }), signal: controller.signal
+      });
+      if (!res.ok || !res.body) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Something went wrong. Please try again.');
+      }
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let i;
+        while ((i = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, i).trim();
+          buf = buf.slice(i + 1);
+          if (line) onEvent(JSON.parse(line));
+        }
+      }
+      if (!finished) throw new Error('The response was interrupted. Please try again.');
     } catch (err) {
       typing.remove();
+      if (shell) shell.msg.classList.remove('ai-streaming');
       const timedOut = err && err.name === 'AbortError';
-      addMessage(timedOut ? 'That took too long — please try again.' : "Couldn't reach the server. Check your connection and try again.", 'bot', { className: 'ai-msg-error' });
+      errorMessage(timedOut ? 'That took too long — please try again.'
+        : (err && err.message && !/fetch|network/i.test(err.message) ? err.message : "Couldn't reach the server. Check your connection and try again."));
     } finally {
+      clearTimeout(timer);
       setBusy(false);
     }
   }
@@ -1001,32 +1162,70 @@ document.querySelectorAll('a, button').forEach(el => {
     const text = input.value.trim();
     if (!text) return;
     input.value = '';
+    updateCounter();
     handleMessage(text);
   });
 
-  document.querySelectorAll('.ai-suggestion-chip').forEach(chip => {
-    chip.addEventListener('click', () => handleMessage(chip.textContent));
+  /* ---------- character counter ---------- */
+  function updateCounter() {
+    const left = 500 - input.value.length;
+    if (left <= 100) { counter.hidden = false; counter.textContent = left + ' characters left'; }
+    else counter.hidden = true;
+  }
+  input.addEventListener('input', updateCounter);
+
+  /* ---------- voice input (Web Speech API, hidden if unsupported) ---------- */
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (SR && micBtn) {
+    micBtn.hidden = false;
+    const rec = new SR();
+    rec.lang = 'en-IN';
+    rec.interimResults = false;
+    let listening = false;
+    rec.onresult = e => {
+      const spoken = e.results[0][0].transcript;
+      input.value = spoken;
+      updateCounter();
+      form.requestSubmit ? form.requestSubmit() : form.dispatchEvent(new Event('submit', { cancelable: true }));
+    };
+    rec.onend = () => { listening = false; micBtn.classList.remove('listening'); };
+    rec.onerror = () => { listening = false; micBtn.classList.remove('listening'); };
+    micBtn.addEventListener('click', () => {
+      if (listening) { rec.stop(); return; }
+      try { rec.start(); listening = true; micBtn.classList.add('listening'); } catch (e) { }
+    });
+  }
+
+  /* ---------- clear / restore ---------- */
+  function resetBody() {
+    while (body.children.length > 1) body.removeChild(body.lastChild);
+  }
+  clearBtn.addEventListener('click', () => {
+    history = [];
+    try { sessionStorage.removeItem(STORAGE_KEY); } catch (e) { }
+    resetBody();
+    showSuggestions(DEFAULT_CHIPS);
   });
 
-  // restore chat after navigating between pages
   try {
     const saved = JSON.parse(sessionStorage.getItem(STORAGE_KEY) || '[]');
     if (saved.length) {
       history = saved;
-      if (suggestions) suggestions.remove();
-      saved.forEach(t => addMessage(t.content, t.role === 'user' ? 'user' : 'bot'));
+      saved.forEach(h => {
+        if (h.role === 'user') { userMessage(h.content); return; }
+        const s = botShell();
+        setText(s, h.content);
+        if (h.meta) { renderCards(s.extras, h.meta.cards); renderLink(s.extras, h.meta.link); }
+        addTools(s, h.meta && h.meta.id);
+      });
+      const last = saved[saved.length - 1];
+      showSuggestions(last && last.meta && last.meta.suggestions);
+    } else {
+      showSuggestions(DEFAULT_CHIPS);
     }
-  } catch (e) { }
+  } catch (e) { showSuggestions(DEFAULT_CHIPS); }
 
-  // clear-chat button
-  const clearBtn = document.getElementById('aiPanelClear');
-  if (clearBtn) clearBtn.addEventListener('click', () => {
-    history = [];
-    try { sessionStorage.removeItem(STORAGE_KEY); } catch (e) { }
-    body.querySelectorAll('.ai-msg:not(:first-child), .ai-msg-typing').forEach(n => n.remove());
-  });
-
-  // projects page: highlight cards the AI pointed at (?highlight=id1,id2)
+  /* ---------- projects page: highlight cards the AI pointed at (?highlight=a,b) ---------- */
   const params = new URLSearchParams(location.search);
   const highlight = (params.get('highlight') || '').split(',').filter(Boolean);
   if (highlight.length) {
