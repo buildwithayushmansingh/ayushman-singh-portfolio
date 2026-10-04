@@ -13,8 +13,8 @@ stream_response() yields events:  meta -> delta* -> done   (see app.py / script.
 import os
 import re
 import json
+import time
 import difflib
-import traceback
 from collections import OrderedDict
 
 from ai import knowledge
@@ -44,7 +44,7 @@ TECH_ALIASES = {'js': 'JavaScript', 'genai': 'Generative AI', 'gen ai': 'Generat
 
 # ---------------------------------------------------------------- Gemini ----
 def _models():
-    raw = os.environ.get('GEMINI_MODELS') or os.environ.get('GEMINI_MODEL') or 'gemini-3.8-flash,gemini-3.7-flash'
+    raw = os.environ.get('GEMINI_MODELS') or os.environ.get('GEMINI_MODEL') or 'gemini-3.8-flash,gemini-3.7-flash,gemini-3.5-flash-lite'
     return [m.strip() for m in raw.split(',') if m.strip()]
 
 
@@ -99,28 +99,42 @@ def _build_prompt(message, history):
     return prompt + f'\n<visitor_message>\n{message}\n</visitor_message>\nAssistant:'
 
 
-def _stream_ai(message, history):
+def _is_retryable(err):
+    """Temporary Google-side problems: overloaded (503), rate limit (429), server errors."""
+    code = getattr(err, 'code', None)
+    return code in (429, 500, 503, 504) or any(k in str(err) for k in ('UNAVAILABLE', 'RESOURCE_EXHAUSTED'))
+
+
+def _stream_ai(message, history, state=None):
+    """Streams text pieces. Retries once on temporary errors, then tries the next model.
+    Sets state['busy'] = True if every model failed because Google was overloaded."""
     client = _get_client()
     if not client:
         return
     prompt = _build_prompt(message, history)
     for model in _models():
-        started = False
-        try:
-            for chunk in client.models.generate_content_stream(model=model, contents=prompt):
-                piece = getattr(chunk, 'text', None)
-                if piece:
-                    started = True
-                    yield piece
-            if started:
-                return
-        except Exception as e:
-            print('GEMINI ERROR', model, type(e).__name__, repr(e))
-            traceback.print_exc()
-            if started:
-                return  # partial answer already shown; don't restart
-            continue  # try next model in the chain
-
+        for attempt in range(2):
+            started = False
+            try:
+                for chunk in client.models.generate_content_stream(model=model, contents=prompt):
+                    piece = getattr(chunk, 'text', None)
+                    if piece:
+                        started = True
+                        yield piece
+                if started:
+                    return
+                break  # empty reply -> next model
+            except Exception as e:
+                print(f'GEMINI ERROR {model} (try {attempt + 1}): {type(e).__name__} {getattr(e, "code", "")}')
+                if started:
+                    return  # partial answer already shown; don't restart
+                if _is_retryable(e):
+                    if state is not None:
+                        state['busy'] = True
+                    if attempt == 0:
+                        time.sleep(1.5)
+                        continue
+                break  # give up on this model -> next model
 
 # ---------------------------------------------------------------- intents ---
 def _tokens(text):
@@ -323,7 +337,8 @@ def stream_response(message, history=None):
         return
 
     parts = []
-    for piece in _stream_ai(message, history):
+    state = {}
+    for piece in _stream_ai(message, history, state):
         if not parts:
             yield {'type': 'meta', 'data': {'source': 'gemini', 'answered': True, 'suggestions': FOLLOWUPS}}
         parts.append(piece)
@@ -334,7 +349,12 @@ def stream_response(message, history=None):
             _cache_put(cache_key, ''.join(parts).strip())
         yield {'type': 'done', 'data': {}}
         return
-
+    if state.get('busy'):
+        yield {'type': 'meta', 'data': {
+            'message': "The AI is a bit busy right now — please try again in a few seconds. Meanwhile I can still answer instantly about projects, skills, certificates, education and contact.",
+            'source': 'ai_busy', 'answered': True, 'suggestions': DEFAULT_SUGGESTIONS}}
+        yield {'type': 'done', 'data': {}}
+        return
     yield {'type': 'meta', 'data': {
         'message': "I couldn't find that in the portfolio. Try asking about projects, skills, certificates, education or contact details.",
         'source': 'fallback', 'answered': False, 'suggestions': DEFAULT_SUGGESTIONS}}
