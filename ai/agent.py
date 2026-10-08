@@ -1,24 +1,25 @@
 """
-Portfolio AI Agent (advanced).
+Portfolio AI Agent - Nexus edition.
 
 Pipeline per message:
-  1. Guard      - blocks prompt-injection style messages.
-  2. Intents    - typo-tolerant rule router answers instantly from data/*.json and can
-                  attach rich cards, a page link and client actions (theme, terminal).
-  3. Gemini     - streams a grounded answer, tries a chain of models, caches repeats.
-  4. Fallback   - friendly message if nothing above could answer.
+  1. Guard    - blocks prompt-injection style messages.
+  2. Intents  - typo-tolerant rule router: instant answers + rich cards + UI actions
+                (project spotlight, compare, job-fit /match, contact form, theme, ...).
+  3. Gemini   - streams a grounded answer in the chosen mode, retries, model chain, cache.
+  4. Fallback - friendly message if nothing above could answer.
 
-stream_response() yields events:  meta -> delta* -> done   (see app.py / script.js)
+stream_response() yields events:  meta -> delta* -> done
 """
 import os
 import re
 import json
 import time
+import random
 import difflib
 from collections import OrderedDict
 
 from ai import knowledge
-from ai.prompts import SYSTEM_INSTRUCTION
+from ai.prompts import SYSTEM_INSTRUCTION, MODE_STYLES
 
 try:
     from google import genai
@@ -26,7 +27,7 @@ except ImportError:  # rule-based answers keep working without the SDK
     genai = None
 
 MAX_HISTORY_TURNS = 6
-DEFAULT_SUGGESTIONS = ['Show my projects', 'What are my skills?', 'Why should I hire Ayushman?', 'Show my certificates']
+DEFAULT_SUGGESTIONS = ['Show my projects', 'Why should I hire Ayushman?', "What's your Developer level?", 'Surprise me']
 FOLLOWUPS = ['Show my projects', 'What are my skills?', 'How can I contact Ayushman?']
 
 _client = None
@@ -40,6 +41,21 @@ _INJECTION = re.compile(
     re.I)
 
 TECH_ALIASES = {'js': 'JavaScript', 'genai': 'Generative AI', 'gen ai': 'Generative AI', 'py': 'Python'}
+
+# words we look for inside a pasted job description (/match)
+TECH_VOCAB = ['python', 'java', 'javascript', 'typescript', 'react', 'angular', 'vue', 'node', 'flask', 'django',
+              'fastapi', 'sql', 'mysql', 'postgresql', 'mongodb', 'sqlite', 'html', 'css', 'git', 'github', 'docker',
+              'kubernetes', 'aws', 'azure', 'gcp', 'linux', 'rest', 'api', 'c++', 'c#', 'php', 'tailwind', 'bootstrap',
+              'machine learning', 'ai', 'nlp', 'pandas', 'numpy', 'tensorflow', 'pytorch', 'figma', 'redis', 'graphql',
+              'spring', 'express', 'data analysis', 'responsive']
+DISPLAY = {'javascript': 'JavaScript', 'typescript': 'TypeScript', 'mysql': 'MySQL', 'sqlite': 'SQLite',
+           'postgresql': 'PostgreSQL', 'mongodb': 'MongoDB', 'github': 'GitHub', 'graphql': 'GraphQL',
+           'fastapi': 'FastAPI', 'nlp': 'NLP', 'git': 'Git', 'pytorch': 'PyTorch', 'tensorflow': 'TensorFlow',
+           'html': 'HTML', 'css': 'CSS', 'aws': 'AWS', 'gcp': 'GCP', 'php': 'PHP', 'sql': 'SQL', 'api': 'API',
+           'ai': 'AI', 'rest': 'REST', 'c++': 'C++', 'c#': 'C#', 'numpy': 'NumPy', 'node': 'Node.js'}
+SKILL_ALIASES = {'sql': {'mysql', 'sqlite'}, 'rest': {'rest apis'}, 'api': {'rest apis'},
+                 'responsive': {'responsive ui'}, 'ai': {'generative ai'}}
+GENERIC_NAME_WORDS = {'project', 'projects', 'personal', 'portfolio', 'private', 'app'}
 
 
 # ---------------------------------------------------------------- Gemini ----
@@ -86,8 +102,8 @@ def _build_context():
     }, indent=2)
 
 
-def _build_prompt(message, history):
-    prompt = SYSTEM_INSTRUCTION.format(context=_build_context())
+def _build_prompt(message, history, mode):
+    prompt = SYSTEM_INSTRUCTION.format(context=_build_context(), mode_style=MODE_STYLES.get(mode, MODE_STYLES['auto']))
     lines = []
     for turn in (history or [])[-MAX_HISTORY_TURNS * 2:]:
         who = 'Visitor' if turn.get('role') == 'user' else 'Assistant'
@@ -105,13 +121,12 @@ def _is_retryable(err):
     return code in (429, 500, 503, 504) or any(k in str(err) for k in ('UNAVAILABLE', 'RESOURCE_EXHAUSTED'))
 
 
-def _stream_ai(message, history, state=None):
-    """Streams text pieces. Retries once on temporary errors, then tries the next model.
-    Sets state['busy'] = True if every model failed because Google was overloaded."""
+def _stream_ai(message, history, mode, state=None):
+    """Streams text pieces. Retries once on temporary errors, then tries the next model."""
     client = _get_client()
     if not client:
         return
-    prompt = _build_prompt(message, history)
+    prompt = _build_prompt(message, history, mode)
     for model in _models():
         for attempt in range(2):
             started = False
@@ -127,16 +142,17 @@ def _stream_ai(message, history, state=None):
             except Exception as e:
                 print(f'GEMINI ERROR {model} (try {attempt + 1}): {type(e).__name__} {getattr(e, "code", "")}')
                 if started:
-                    return  # partial answer already shown; don't restart
+                    return
                 if _is_retryable(e):
                     if state is not None:
                         state['busy'] = True
                     if attempt == 0:
                         time.sleep(1.5)
                         continue
-                break  # give up on this model -> next model
+                break
 
-# ---------------------------------------------------------------- intents ---
+
+# ---------------------------------------------------------------- helpers ---
 def _tokens(text):
     return re.findall(r'[a-z0-9+#]+(?:\.[a-z0-9]+)*', text.lower())
 
@@ -156,7 +172,7 @@ def _match(tokens, stems):
     return False
 
 
-def _phrase_has_term(text, term):
+def _has_term(text, term):
     return re.search(r'(?<![a-z0-9])' + re.escape(term.lower()) + r'(?![a-z0-9+#])', text) is not None
 
 
@@ -177,36 +193,110 @@ def _project_cards(projects):
     return {'type': 'projects', 'items': [{k: p.get(k) for k in keys} for p in projects]}
 
 
+def _spotlight(p):
+    keys = ('id', 'name', 'description', 'technologies', 'github', 'live')
+    return {'type': 'spotlight', 'items': [{k: p.get(k) for k in keys}]}
+
+
 def _find_tech(text):
     for alias, tech in TECH_ALIASES.items():
-        if _phrase_has_term(text, alias):
+        if _has_term(text, alias):
             return tech
-    return next((t for t in knowledge.get_all_technologies() if _phrase_has_term(text, t)), None)
+    return next((t for t in knowledge.get_all_technologies() if _has_term(text, t)), None)
 
 
 def _find_skill(text):
     for cat in knowledge.get_skills():
         for s in cat['skills']:
-            if len(s) > 2 and _phrase_has_term(text, s):
+            if len(s) > 2 and _has_term(text, s):
                 return s, cat
     return None, None
 
 
+def _project_keys(p):
+    keys = {p['name'].lower(), p['id'].replace('-', ' ')}
+    keys.update(t for t in _tokens(p['name']) if len(t) >= 5 and t not in GENERIC_NAME_WORDS)
+    return keys
+
+
+def _find_projects(text):
+    """Projects mentioned by name, in the order they appear."""
+    found = []
+    for p in knowledge.get_projects():
+        hits = [m.start() for k in _project_keys(p) for m in [re.search(r'(?<![a-z0-9])' + re.escape(k) + r'(?![a-z0-9])', text)] if m]
+        if hits:
+            found.append((min(hits), p))
+    return [p for _, p in sorted(found, key=lambda x: x[0])]
+
+
+def mode_suggestions(mode):
+    names = [p['name'] for p in knowledge.get_projects()]
+    return {
+        'recruiter': ['Why should I hire Ayushman?', 'Is he open to work?', 'Send a message to Ayushman', 'Show resume'],
+        'tech': ['Which projects use Flask?', 'What are my skills?', f'Compare {names[0]} and {names[1]}' if len(names) > 1 else 'Show my projects', '/match'],
+        'casual': ['Surprise me', 'Show my projects', 'Tell me about Ayushman', "What's your Developer level?"],
+    }.get(mode, DEFAULT_SUGGESTIONS)
+
+
+# ------------------------------------------------------- job-fit (/match) ---
+def _has_skill(term, have):
+    if term in have:
+        return True
+    if any(term in re.split(r'[\s&/,\-]+', h) for h in have):
+        return True
+    return bool(SKILL_ALIASES.get(term, set()) & have)
+
+
+def _job_match(jd):
+    text = jd.lower()
+    wanted = [t for t in TECH_VOCAB if _has_term(text, t)]
+    have = {s.lower() for cat in knowledge.get_skills() for s in cat['skills']}
+    have |= {t.lower() for p in knowledge.get_projects() for t in p.get('technologies', [])}
+    matched = [t for t in wanted if _has_skill(t, have)]
+    missing = [t for t in wanted if t not in matched]
+    if not wanted:
+        return None
+    score = round(100 * len(matched) / len(wanted))
+    verdict = 'Strong match' if score >= 75 else 'Good match, a few gaps' if score >= 50 else 'Partial match — room to grow'
+    names = lambda ts: [DISPLAY.get(t, t.title()) for t in ts]
+    relevant = [p['name'] for p in knowledge.get_projects()
+                if any(_has_skill(t, {x.lower() for x in p.get('technologies', [])}) for t in matched)]
+    return {'type': 'match', 'score': score, 'verdict': verdict,
+            'matched': names(matched), 'missing': names(missing), 'projects': relevant}
+
+
+# ---------------------------------------------------------------- intents ---
 def _rule_based(message):
-    text = message.lower()
+    text = message.lower().strip()
     tokens = _tokens(text)
     if not tokens:
         return None
     profile = knowledge.get_profile()
+    projects = knowledge.get_projects()
 
-    # greetings / thanks (short messages only)
+    # /match <job description>
+    if text.startswith('/match'):
+        jd = message.strip()[6:].strip()
+        if len(jd) < 15:
+            return _reply('match_help', 'Paste a job description after the command, like `/match Looking for a Python Flask developer with SQL and REST API experience`. I\'ll score how well Ayushman\'s skills fit.', ['Show my skills' if False else 'What are my skills?', 'Why should I hire Ayushman?'])
+        result = _job_match(jd)
+        if not result:
+            return _reply('match_none', "I couldn't spot specific technologies in that text. Try pasting the requirements section of the job description.",
+                          ['What are my skills?', 'Show my projects'])
+        return _reply('match', f"**{result['score']}% skill match** — {result['verdict']}. This compares the technologies named in the description with Ayushman's skills and projects.",
+                      ['Show my projects', 'Send a message to Ayushman', 'Why should I hire Ayushman?'], cards=result)
+
+    # greetings / thanks / help
     if len(tokens) <= 4 and _word(tokens, 'hi', 'hello', 'hey', 'hii', 'namaste', 'hola', 'yo'):
-        return _reply('greeting', "Hi! I'm Ayushman's portfolio assistant. Ask me about his projects, skills, certificates, education or how to reach him.", DEFAULT_SUGGESTIONS)
+        return _reply('greeting', "Hi! I'm Ayushman's portfolio assistant. Ask me about his projects, skills, certificates or how to reach him — or type `/` to see everything I can do.", DEFAULT_SUGGESTIONS)
     if len(tokens) <= 5 and _word(tokens, 'thanks', 'thank', 'thx', 'shukriya', 'dhanyavad'):
         return _reply('thanks', "You're welcome! Anything else you'd like to know about Ayushman's work?")
     if len(tokens) <= 4 and _word(tokens, 'bye', 'goodbye'):
         return _reply('bye', "Thanks for visiting! If you'd like to talk, Ayushman's contact page is one click away.",
                       link={'url': '/contact', 'label': 'Go to contact page'})
+    if _word(tokens, 'help', 'commands') or 'what can you do' in text:
+        return _reply('help', "Here's what I can do:\n- **Answer** about projects, skills, certificates, education\n- **Spotlight** or **compare** projects (`Compare A and B`)\n- **Score a job fit** with `/match <job description>`\n- **Show live stats** like Developer level and XP\n- **Switch theme**, open the terminal, or help you **message** Ayushman\n- Switch my tone with the **Recruiter / Tech / Casual** tabs",
+                      ['Show my projects', 'Surprise me', '/match'])
 
     # UI control: theme / terminal
     if _match(tokens, ['theme', 'mode', 'switch', 'change', 'turn', 'enable']):
@@ -231,15 +321,46 @@ def _rule_based(message):
                           ['Show GitHub activity', 'Show my projects', 'What are my skills?'],
                           link={'url': '/developer', 'label': 'Open Developer ID card'})
 
-    # GitHub activity page
     if 'github' in tokens and _match(tokens, ['activity', 'commit', 'contribution', 'repo', 'stat']):
         return _reply('github', "Here's Ayushman's live GitHub activity — it syncs real commits and repos into his Developer XP.",
                       link={'url': '/github', 'label': 'View GitHub activity'})
 
-    # "which projects use X"
+    # surprise me
+    if _word(tokens, 'surprise', 'random') or 'fun fact' in text:
+        p = random.choice(projects)
+        return _reply('surprise', f"Here's a random pick from Ayushman's work — **{p['name']}**:",
+                      ['Surprise me', 'Show my projects', 'Why should I hire Ayushman?'], cards=_spotlight(p),
+                      link={'url': '/projects?highlight=' + p['id'], 'label': 'Highlight on projects page'})
+
+    # compare projects / project spotlight
+    found = _find_projects(text)
     tech = _find_tech(text)
+    wants_compare = _match(tokens, ['compar', 'versus', 'differ']) or ' vs ' in f' {text} '
+    if wants_compare:
+        if len(found) >= 2:
+            a, b = found[0], found[1]
+            ta, tb = a.get('technologies', []), b.get('technologies', [])
+            shared = [t for t in ta if t in tb]
+            msg = (f"**{a['name']}** vs **{b['name']}** — they share {len(shared)} technolog{'y' if len(shared) == 1 else 'ies'}."
+                   if shared else f"**{a['name']}** and **{b['name']}** use completely different stacks.")
+            return _reply('compare', msg, ['Show my projects', 'Which projects use Flask?', 'Surprise me'],
+                          cards={'type': 'compare', 'items': [
+                              {'id': a['id'], 'name': a['name'], 'technologies': ta},
+                              {'id': b['id'], 'name': b['name'], 'technologies': tb}], 'shared': shared})
+        if len(projects) > 1:
+            return _reply('compare_help', f"Tell me which two to compare — for example: `Compare {projects[0]['name']} and {projects[1]['name']}`.",
+                          [f"Compare {projects[0]['name']} and {projects[1]['name']}", 'Show my projects'])
+
+    which_tech = tech and _word(tokens, 'use', 'uses', 'using', 'built', 'made', 'which', 'any')
+    if len(found) == 1 and not which_tech:
+        p = found[0]
+        return _reply('spotlight', f"**{p['name']}** is built with {', '.join(p.get('technologies', []))}.",
+                      ['Compare my projects', 'Show my projects', 'Which projects use Flask?'], cards=_spotlight(p),
+                      link={'url': '/projects?highlight=' + p['id'], 'label': 'Highlight on projects page'})
+
+    # "which projects use X"
     if tech and _match(tokens, ['project', 'use', 'using', 'built', 'made', 'build', 'app', 'work']):
-        matches = [p for p in knowledge.get_projects() if tech in p['technologies']]
+        matches = [p for p in projects if tech in p['technologies']]
         if matches:
             n = len(matches)
             return _reply('tech_projects', f"{n} project{'s' if n != 1 else ''} use{'' if n != 1 else 's'} **{tech}**:",
@@ -248,16 +369,15 @@ def _rule_based(message):
                           link={'url': '/projects?highlight=' + ','.join(p['id'] for p in matches), 'label': 'Highlight on projects page'})
 
     if _match(tokens, ['project', 'portfolio work']) or 'work you' in text:
-        projects = knowledge.get_projects()
         return _reply('projects', f'Ayushman has built {len(projects)} projects:',
-                      ['Which projects use Flask?', 'What are my skills?', 'Why should I hire Ayushman?'],
+                      ['Which projects use Flask?', 'Compare my projects', 'Why should I hire Ayushman?'],
                       cards=_project_cards(projects), link={'url': '/projects', 'label': 'Open projects page'})
 
-    # specific skill ("does he know MySQL?") vs overview
+    # specific skill vs overview
     skill, cat = _find_skill(text)
     overview = _match(tokens, ['skill', 'technolog', 'stack', 'expertise', 'proficien'])
     if skill and not overview:
-        used_in = [p['name'] for p in knowledge.get_projects() if skill in p['technologies']]
+        used_in = [p['name'] for p in projects if skill in p['technologies']]
         extra = f" He used it in {', '.join(used_in)}." if used_in else ''
         return _reply('skill', f"Yes — **{skill}** is part of Ayushman's {cat['category'].lower()} skills.{extra}",
                       ['Which projects use Flask?', 'Show my projects', 'Show my certificates'],
@@ -280,16 +400,29 @@ def _rule_based(message):
         return _reply('education', f"**{e['degree']}** at {e['institution']} — {e['status']}.",
                       ['Show my projects', 'What are my skills?', 'Show my certificates'])
 
+    # resume
+    if _word(tokens, 'resume', 'cv', 'curriculum'):
+        return _reply('resume', "Ayushman's resume button in the top bar opens his LinkedIn profile, which has his full background.",
+                      ['Send a message to Ayushman', 'Is he open to work?', 'Show my projects'],
+                      link={'url': profile['linkedin'], 'label': 'Open LinkedIn profile'})
+
+    # write a message (in-chat mini form)
+    if any(p in text for p in ('send a message', 'send message', 'write to', 'message ayushman', 'message him',
+                               'leave a message', 'drop a message', 'get in touch', 'email him')):
+        return _reply('message_form', "Sure — write your message below and I'll open it in your email app, addressed to Ayushman.",
+                      ['Is he open to work?', 'Show my projects'],
+                      cards={'type': 'contact_form', 'email': profile['email']})
+
     if _match(tokens, ['contact', 'email', 'reach', 'linkedin', 'instagram', 'connect']):
         return _reply('contact',
                       f"You can email Ayushman at {profile['email']}, connect on LinkedIn ({profile['linkedin']}) "
                       f"or follow his code on GitHub ({profile['github']}).",
-                      ['Is he open to work?', 'Show my projects', 'What are my skills?'],
+                      ['Send a message to Ayushman', 'Is he open to work?', 'Show my projects'],
                       link={'url': '/contact', 'label': 'Go to contact page'})
 
     if _match(tokens, ['availab', 'internship', 'hiring', 'opportunit']) or 'open to work' in text or 'looking for' in text:
         return _reply('status', f"{profile['status']}. The fastest way to reach him is by email: {profile['email']}.",
-                      ['Why should I hire Ayushman?', 'Show my projects', 'How can I contact Ayushman?'],
+                      ['Why should I hire Ayushman?', 'Send a message to Ayushman', 'Show my projects'],
                       link={'url': '/contact', 'label': 'Go to contact page'})
 
     if _match(tokens, ['about', 'bio', 'introduc', 'yourself']) or 'who is' in text or 'who are' in text:
@@ -314,12 +447,15 @@ def _cache_put(key, value):
         _CACHE.popitem(last=False)
 
 
-def stream_response(message, history=None):
+def stream_response(message, history=None, mode='auto'):
     """Yields {'type': 'meta'|'delta'|'done', ...} events."""
+    mode = mode if mode in MODE_STYLES else 'auto'
+    sugg = mode_suggestions(mode)
+
     if _INJECTION.search(message):
         yield {'type': 'meta', 'data': {
             'message': "I can only help with questions about Ayushman's portfolio — projects, skills, certificates, education and contact.",
-            'source': 'guard', 'answered': True, 'suggestions': DEFAULT_SUGGESTIONS}}
+            'source': 'guard', 'answered': True, 'suggestions': sugg}}
         yield {'type': 'done', 'data': {}}
         return
 
@@ -329,16 +465,15 @@ def stream_response(message, history=None):
         yield {'type': 'done', 'data': {}}
         return
 
-    cache_key = ' '.join(_tokens(message)) if not history else None
+    cache_key = (mode + '|' + ' '.join(_tokens(message))) if not history else None
     cached = _cache_get(cache_key) if cache_key else None
     if cached:
         yield {'type': 'meta', 'data': {'message': cached, 'source': 'cache', 'answered': True, 'suggestions': FOLLOWUPS}}
         yield {'type': 'done', 'data': {}}
         return
 
-    parts = []
-    state = {}
-    for piece in _stream_ai(message, history, state):
+    parts, state = [], {}
+    for piece in _stream_ai(message, history, mode, state):
         if not parts:
             yield {'type': 'meta', 'data': {'source': 'gemini', 'answered': True, 'suggestions': FOLLOWUPS}}
         parts.append(piece)
@@ -349,22 +484,24 @@ def stream_response(message, history=None):
             _cache_put(cache_key, ''.join(parts).strip())
         yield {'type': 'done', 'data': {}}
         return
+
     if state.get('busy'):
         yield {'type': 'meta', 'data': {
             'message': "The AI is a bit busy right now — please try again in a few seconds. Meanwhile I can still answer instantly about projects, skills, certificates, education and contact.",
-            'source': 'ai_busy', 'answered': True, 'suggestions': DEFAULT_SUGGESTIONS}}
+            'source': 'ai_busy', 'answered': True, 'suggestions': sugg}}
         yield {'type': 'done', 'data': {}}
         return
+
     yield {'type': 'meta', 'data': {
         'message': "I couldn't find that in the portfolio. Try asking about projects, skills, certificates, education or contact details.",
-        'source': 'fallback', 'answered': False, 'suggestions': DEFAULT_SUGGESTIONS}}
+        'source': 'fallback', 'answered': False, 'suggestions': sugg}}
     yield {'type': 'done', 'data': {}}
 
 
-def generate_response(message, history=None):
+def generate_response(message, history=None, mode='auto'):
     """Non-streaming version (used by /api/ai)."""
     payload, text = {}, ''
-    for ev in stream_response(message, history):
+    for ev in stream_response(message, history, mode):
         if ev['type'] == 'meta':
             payload.update(ev['data'])
             text = ev['data'].get('message', text)

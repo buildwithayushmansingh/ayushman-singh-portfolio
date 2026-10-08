@@ -1,28 +1,87 @@
-<!-- AI portfolio assistant — floating button + chat panel (streaming, cards, voice, feedback) -->
-<button type="button" class="ai-fab" id="aiFab" aria-haspopup="dialog" aria-expanded="false" aria-label="Open portfolio AI assistant (Ctrl+/)" data-cursor-text="Ask AI">
-  <span class="ai-fab-icon">🤖</span>
-  <span class="ai-fab-label">Ask AI</span>
-</button>
+<!-- Nexus AI — HUD launcher + command-deck chat panel -->
+<div class="nx-root" id="nxRoot">
 
-<div class="ai-panel" id="aiPanel" role="dialog" aria-modal="false" aria-label="Portfolio AI assistant" hidden>
-  <div class="ai-panel-header">
-    <span class="ai-panel-title">🤖 Portfolio AI <span class="ai-online-dot" title="Online"></span></span>
-    <span class="ai-panel-actions">
-      <button type="button" class="ai-panel-clear" id="aiPanelClear" aria-label="Clear chat" title="Clear chat">⟲</button>
-      <button type="button" class="ai-panel-close" id="aiPanelClose" aria-label="Close AI assistant">×</button>
+  <div class="nx-teaser" id="nxTeaser" hidden>
+    <button type="button" class="nx-teaser-close" id="nxTeaserClose" aria-label="Dismiss">×</button>
+    <span id="nxTeaserText">Ask me anything about Ayushman's work</span>
+  </div>
+
+  <button type="button" class="nx-orb" id="nxOrb" aria-haspopup="dialog" aria-expanded="false" aria-label="Open portfolio AI assistant (Ctrl+/)" data-cursor-text="Ask AI">
+    <span class="nx-orb-ping"></span>
+    <span class="nx-orb-ping nx-orb-ping-2"></span>
+    <svg class="nx-orb-ring" viewBox="0 0 80 80" aria-hidden="true"><circle cx="40" cy="40" r="37"/></svg>
+    <span class="nx-orb-hex">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="2.4"/><circle cx="5" cy="6" r="1.7"/><circle cx="19" cy="6" r="1.7"/><circle cx="12" cy="20" r="1.7"/><path d="M12 12L5 6M12 12l7-6M12 12v8"/></svg>
     </span>
-  </div>
+    <span class="nx-orb-tag">ASK_AI <kbd>Ctrl /</kbd></span>
+  </button>
 
-  <div class="ai-panel-body" id="aiPanelBody" aria-live="polite">
-    <div class="ai-msg ai-msg-bot">
-      <div class="ai-msg-text">Hi! I'm your portfolio assistant.<br>Ask me about the developer, projects, skills, certificates or journey — or try <b>"switch to light theme"</b>.</div>
+  <section class="nx-panel" id="nxPanel" role="dialog" aria-modal="false" aria-label="Portfolio AI assistant" hidden>
+    <div class="nx-frame">
+      <div class="nx-inner">
+        <div class="nx-grid" aria-hidden="true"></div>
+        <div class="nx-scan" aria-hidden="true"></div>
+
+        <header class="nx-head">
+          <div class="nx-avatar" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.4"/><circle cx="5" cy="6" r="1.7"/><circle cx="19" cy="6" r="1.7"/><circle cx="12" cy="20" r="1.7"/><path d="M12 12L5 6M12 12l7-6M12 12v8"/></svg>
+          </div>
+          <div class="nx-head-text">
+            <div class="nx-title">NEXUS <span>// Ayushman</span></div>
+            <div class="nx-status"><span class="nx-signal"><i></i><i></i><i></i></span><span id="nxStatus">Online</span></div>
+          </div>
+          <div class="nx-head-actions">
+            <button type="button" class="nx-icon-btn" id="nxSpeak" aria-pressed="false" aria-label="Read answers aloud" title="Read answers aloud">
+              <svg viewBox="0 0 24 24"><path d="M11 5L6 9H3v6h3l5 4V5z"/><path d="M15.5 8.5a5 5 0 010 7M18.5 5.5a9 9 0 010 13"/></svg>
+            </button>
+            <button type="button" class="nx-icon-btn nx-expand" id="nxExpand" aria-pressed="false" aria-label="Expand chat" title="Expand">
+              <svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+            </button>
+            <button type="button" class="nx-icon-btn" id="nxExport" aria-label="Download transcript" title="Download transcript">
+              <svg viewBox="0 0 24 24"><path d="M12 4v11m0 0l-4-4m4 4l4-4M5 20h14"/></svg>
+            </button>
+            <button type="button" class="nx-icon-btn" id="nxClear" aria-label="Clear chat" title="Clear chat">
+              <svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 0115-6.7L21 8M21 3v5h-5M21 12a9 9 0 01-15 6.7L3 16M3 21v-5h5"/></svg>
+            </button>
+            <button type="button" class="nx-icon-btn nx-close" id="nxClose" aria-label="Close AI assistant" title="Close">
+              <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+            </button>
+          </div>
+        </header>
+
+        <div class="nx-modes" id="nxModes" role="tablist" aria-label="Conversation mode" style="--idx:0">
+          <button type="button" class="nx-mode is-active" data-mode="auto" role="tab" aria-selected="true">AUTO</button>
+          <button type="button" class="nx-mode" data-mode="recruiter" role="tab" aria-selected="false">RECRUITER</button>
+          <button type="button" class="nx-mode" data-mode="tech" role="tab" aria-selected="false">TECH</button>
+          <button type="button" class="nx-mode" data-mode="casual" role="tab" aria-selected="false">CASUAL</button>
+          <span class="nx-modes-glider" aria-hidden="true"></span>
+        </div>
+
+        <div class="nx-body" id="nxBody" aria-live="polite">
+          <div class="nx-msg nx-msg-bot">
+            <div class="nx-msg-text"><p>Hi, I'm Ayushman's AI.</p><p>Ask about his projects, skills or certificates — paste a job description with <code>/match</code>, or type <code>/</code> to see everything I can do.</p></div>
+          </div>
+        </div>
+
+        <div class="nx-chips" id="nxChips"></div>
+        <div class="nx-counter" id="nxCounter" hidden></div>
+
+        <form class="nx-form" id="nxForm" autocomplete="off">
+          <div class="nx-slash" id="nxSlash" role="listbox" hidden></div>
+          <div class="nx-input-wrap">
+            <span class="nx-prompt" aria-hidden="true">❯</span>
+            <input type="text" id="nxInput" class="nx-input" maxlength="2000" placeholder="Ask anything, or type / for commands" aria-label="Ask the portfolio AI assistant">
+            <button type="button" class="nx-mic" id="nxMic" aria-label="Speak your question" title="Speak" hidden>
+              <svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0014 0M12 18v3"/></svg>
+            </button>
+            <button type="submit" class="nx-send" id="nxSend" aria-label="Send">
+              <svg class="nx-send-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+              <svg class="nx-send-stop" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor"/></svg>
+            </button>
+          </div>
+        </form>
+        <div class="nx-foot">AI can be wrong · chats saved anonymously</div>
+      </div>
     </div>
-  </div>
-
-  <div class="ai-counter" id="aiCounter" hidden></div>
-  <form class="ai-panel-input-row" id="aiForm">
-    <input type="text" id="aiInput" class="ai-input" placeholder="Ask something..." maxlength="500" autocomplete="off" aria-label="Ask the portfolio AI assistant">
-    <button type="button" class="ai-mic-btn" id="aiMic" aria-label="Speak your question" title="Speak" hidden>🎤</button>
-    <button type="submit" class="ai-send-btn" aria-label="Send">➤</button>
-  </form>
+  </section>
 </div>
