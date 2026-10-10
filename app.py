@@ -11,8 +11,10 @@ import xp_engine
 import github_sync
 import ai.agent as ai_agent
 import ai.store as ai_store 
+import space
 app = Flask(__name__)
 
+space.init_app(app)
 xp_engine.init_db()
 ai_store.init() 
 xp_engine.seed_initial_xp()

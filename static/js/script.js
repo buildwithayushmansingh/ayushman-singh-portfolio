@@ -1118,6 +1118,23 @@ document.querySelectorAll('a, button').forEach(el => {
     c.append(name, msg, row, el('div', 'nx-form-note', 'Opens your own email app — nothing is sent from this site.'));
     return c;
   }
+  function profileCard(d) {
+    const c = newCard(0); c.classList.add('nx-profile');
+    const top = el('div', 'nx-profile-top');
+    const img = el('img', 'nx-profile-img'); img.src = d.photo; img.alt = d.name; img.loading = 'lazy';
+    const info = el('div');
+    info.append(el('div', 'nx-card-title', d.name), el('div', 'nx-card-desc', d.title + (d.location ? ' · ' + d.location : '')));
+    top.append(img, info);
+    c.appendChild(top);
+    if (d.tagline) c.appendChild(el('div', 'nx-card-desc', d.tagline));
+    if (d.status) { const st = el('div', 'nx-profile-status'); st.append(el('i'), document.createTextNode(d.status)); c.appendChild(st); }
+    const row = el('div', 'nx-spot-actions');
+    if (d.github) row.appendChild(extLink('GitHub', d.github, 'nx-btn'));
+    if (d.linkedin) row.appendChild(extLink('LinkedIn', d.linkedin, 'nx-btn'));
+    if (d.email) { const m = el('a', 'nx-btn is-primary', 'Email'); m.href = 'mailto:' + d.email; row.appendChild(m); }
+    c.appendChild(row);
+    return c;
+  }
   function renderCards(box, cards) {
     if (!cards) return;
     const wrap = el('div', 'nx-cards');
@@ -1129,6 +1146,7 @@ document.querySelectorAll('a, button').forEach(el => {
       case 'compare': wrap.appendChild(compareCard(cards)); break;
       case 'match': wrap.appendChild(matchCard(cards)); break;
       case 'contact_form': wrap.appendChild(contactCard(cards.email)); break;
+      case 'profile': wrap.appendChild(profileCard(cards)); break;
       default: return;
     }
     box.appendChild(wrap);

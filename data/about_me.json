@@ -1,0 +1,156 @@
+{
+    "_help": "Yahan apne baare me extra details likho jo AI visitors ko bata sake. Sirf SACH likho. 'answer' khaali ('') chhodoge to wo entry skip ho jayegi. Save karte hi AI use karne lagta hai (restart ki zaroorat nahi). 'keywords' wo shabd hain jin par ye jawab chalega. Naye sawal-jawab add karne ke liye koi bhi entry copy karke edit karo.",
+    "facts": [
+        {
+            "topic": "Location",
+            "keywords": [
+                "location",
+                "based",
+                "city",
+                "reside",
+                "where does he live",
+                "where do you live",
+                "where is he from",
+                "where is he based",
+                "live in"
+            ],
+            "answer": "Ayushman is based in Greater Noida, Uttar Pradesh, India."
+        },
+        {
+            "topic": "Passion",
+            "keywords": [
+                "passion",
+                "passionate",
+                "motto",
+                "mission",
+                "philosophy",
+                "tagline",
+                "what drives",
+                "motivation"
+            ],
+            "answer": "Ayushman's focus is turning ideas into clean, functional and engaging web experiences. He is passionate about learning new technologies, building real-world projects and exploring AI-powered solutions."
+        },
+        {
+            "topic": "Goals",
+            "keywords": [
+                "goal",
+                "goals",
+                "aim",
+                "future",
+                "plans",
+                "ambition",
+                "career goals"
+            ],
+            "answer": "Right now Ayushman is actively seeking internship opportunities. He wants to keep building real-world projects and exploring AI-powered solutions."
+        },
+        {
+            "topic": "Hobbies",
+            "keywords": [
+                "hobby",
+                "hobbies",
+                "interests",
+                "free time",
+                "outside coding",
+                "leisure"
+            ],
+            "answer": ""
+        },
+        {
+            "topic": "Strengths",
+            "keywords": [
+                "strength",
+                "strengths",
+                "good at",
+                "best at",
+                "superpower"
+            ],
+            "answer": ""
+        },
+        {
+            "topic": "Currently improving",
+            "keywords": [
+                "weakness",
+                "weaknesses",
+                "improve",
+                "improving",
+                "learning now",
+                "working on",
+                "growth areas"
+            ],
+            "answer": ""
+        },
+        {
+            "topic": "Languages",
+            "keywords": [
+                "languages spoken",
+                "speak",
+                "language he speaks",
+                "hindi",
+                "english",
+                "communication"
+            ],
+            "answer": ""
+        },
+        {
+            "topic": "Favourite tools",
+            "keywords": [
+                "favourite",
+                "favorite",
+                "editor",
+                "ide",
+                "tools he uses",
+                "daily tools"
+            ],
+            "answer": ""
+        },
+        {
+            "topic": "Work style",
+            "keywords": [
+                "work style",
+                "teamwork",
+                "team player",
+                "collaborate",
+                "remote",
+                "relocate",
+                "relocation"
+            ],
+            "answer": ""
+        },
+        {
+            "topic": "Achievements",
+            "keywords": [
+                "achievement",
+                "achievements",
+                "awards",
+                "won",
+                "hackathon",
+                "competition",
+                "accomplishment"
+            ],
+            "answer": ""
+        },
+        {
+            "topic": "Preferred role",
+            "keywords": [
+                "preferred role",
+                "dream job",
+                "role",
+                "domain",
+                "which field",
+                "looking for role"
+            ],
+            "answer": ""
+        },
+        {
+            "topic": "Fun fact",
+            "keywords": [
+                "fun fact",
+                "interesting",
+                "unique",
+                "something different",
+                "about him personally"
+            ],
+            "answer": ""
+        }
+    ]
+}

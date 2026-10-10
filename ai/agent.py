@@ -99,6 +99,7 @@ def _build_context():
         'projects': knowledge.get_projects(),
         'certificates': knowledge.get_certificates(),
         'developer_stats': _live_stats(),
+        'extra_knowledge': [{'topic': e['topic'], 'answer': e['answer']} for e in _extra_entries()],
     }, indent=2)
 
 
@@ -265,6 +266,106 @@ def _job_match(jd):
             'matched': names(matched), 'missing': names(missing), 'projects': relevant}
 
 
+# ------------------------------------------- personal knowledge (about_me.json) ---
+EXTRA_PATH = os.path.join(knowledge.DATA_DIR, 'about_me.json')
+_extra_cache = {'mtime': None, 'entries': []}
+
+
+def _extra_entries():
+    """Q&A entries Ayushman wrote himself. Reloaded automatically when the file changes."""
+    try:
+        mtime = os.path.getmtime(EXTRA_PATH)
+    except OSError:
+        return []
+    if _extra_cache['mtime'] != mtime:
+        try:
+            with open(EXTRA_PATH, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        except Exception as e:
+            print('about_me.json error:', repr(e))
+            return _extra_cache['entries']
+        entries = []
+        for item in data.get('facts', []):
+            answer = (item.get('answer') or '').strip()
+            if answer:
+                entries.append({'topic': (item.get('topic') or '').strip(),
+                                'keywords': [k.lower() for k in item.get('keywords', [])],
+                                'answer': answer})
+        _extra_cache.update(mtime=mtime, entries=entries)
+    return _extra_cache['entries']
+
+
+def _kb_match(text, tokens, min_score=1.5):
+    best, best_score = None, 0
+    for e in _extra_entries():
+        score = 0
+        for kw in set(e['keywords'] + [e['topic'].lower()]):
+            if not kw:
+                continue
+            if ' ' in kw:
+                score += 2 if kw in text else 0
+            elif kw in tokens:
+                score += 1.5
+            elif len(kw) >= 5 and _match(tokens, [kw]):
+                score += 1
+        if score > best_score:
+            best, best_score = e, score
+    return best if best_score >= min_score else None
+
+
+def _topic_suggestions(exclude=None):
+    topics = [e['topic'] for e in _extra_entries() if e['topic'] and e is not exclude]
+    return [f"Tell me about his {t.lower()}" for t in topics[:2]]
+
+
+def _profile_card():
+    p = knowledge.get_profile()
+    return {'type': 'profile', 'name': p['name'], 'title': p['title'], 'location': p.get('location', ''),
+            'tagline': p.get('tagline', ''), 'status': p.get('status', ''), 'photo': '/static/images/profile.jpg',
+            'github': p.get('github'), 'linkedin': p.get('linkedin'), 'email': p.get('email')}
+
+
+def _pitch():
+    """A positive, fully data-backed summary - works even when Gemini is down."""
+    projects, skills, certs = knowledge.get_projects(), knowledge.get_skills(), knowledge.get_certificates()
+    profile, stats = knowledge.get_profile(), _live_stats()
+    lines = ["Here's why Ayushman is worth a conversation:",
+             f"- **Ships real projects** — {len(projects)} built so far: {', '.join(p['name'] for p in projects)}",
+             f"- **Full-stack range** — {', '.join(c['category'].lower() for c in skills[:4])}"]
+    if certs:
+        lines.append(f"- **Always learning** — {len(certs)} certificates, including {certs[0]['name']}")
+    if stats:
+        lines.append(f"- **Consistent growth** — Level {stats['level']} ({stats['title']}) on his Developer ID with {stats['total_xp']} XP")
+    lines.append(f"- **Available** — {profile.get('status', 'open to opportunities')}")
+    return _reply('pitch', '\n'.join(lines), ['Show my projects', 'Send a message to Ayushman', 'What are my skills?'],
+                  link={'url': '/contact', 'label': 'Go to contact page'})
+
+
+def _deflect():
+    """Honest + positive reply when nothing in the data matches (never invents facts)."""
+    profile = knowledge.get_profile()
+    first = profile['bio'].split('. ')[0].rstrip('.') + '.'
+    r = _reply('deflect',
+               f"That specific detail isn't on Ayushman's portfolio yet — but here's what I can tell you: {first} "
+               f"For anything more personal, the quickest way is to message him directly.",
+               ['Send a message to Ayushman', 'Show my projects', 'Why should I hire Ayushman?'],
+               cards=_profile_card(), link={'url': '/contact', 'label': 'Go to contact page'})
+    r['answered'] = False        # shows up in /admin/ai-stats so you know what to add to about_me.json
+    return r
+
+
+def _offline_answer(message):
+    """Best local answer when Gemini can't help (busy, no key, quota)."""
+    text = message.lower()
+    tokens = _tokens(text)
+    if _match(tokens, ['hire', 'strength', 'standout']) or 'stand out' in text or 'good at' in text or 'why should' in text:
+        return _pitch()
+    e = _kb_match(text, tokens, min_score=1)
+    if e:
+        return _reply('kb', e['answer'], _topic_suggestions(e) + ['Show my projects'])
+    return None
+
+
 # ---------------------------------------------------------------- intents ---
 def _rule_based(message):
     text = message.lower().strip()
@@ -425,9 +526,15 @@ def _rule_based(message):
                       ['Why should I hire Ayushman?', 'Send a message to Ayushman', 'Show my projects'],
                       link={'url': '/contact', 'label': 'Go to contact page'})
 
-    if _match(tokens, ['about', 'bio', 'introduc', 'yourself']) or 'who is' in text or 'who are' in text:
-        return _reply('about', profile['bio'], ['Show my projects', 'What are my skills?', 'Why should I hire Ayushman?'],
-                      link={'url': '/about', 'label': 'Read the About page'})
+    # personal Q&A that Ayushman wrote himself (hobbies, goals, strengths, ...)
+    entry = _kb_match(text, tokens)
+    if entry:
+        return _reply('kb', entry['answer'], _topic_suggestions(entry) + ['Show my projects'])
+
+    if (_match(tokens, ['bio', 'introduc', 'yourself']) or 'who is' in text or 'who are' in text
+            or (_word(tokens, 'about') and _word(tokens, 'ayushman', 'him', 'you', 'himself', 'me', 'portfolio') and len(tokens) <= 6)):
+        return _reply('about', profile['bio'], ['Why should I hire Ayushman?', 'Show my projects', 'What are my skills?'] + _topic_suggestions()[:1],
+                      cards=_profile_card(), link={'url': '/about', 'label': 'Read the About page'})
 
     return None
 
@@ -485,6 +592,12 @@ def stream_response(message, history=None, mode='auto'):
         yield {'type': 'done', 'data': {}}
         return
 
+    offline = _offline_answer(message)
+    if offline:
+        yield {'type': 'meta', 'data': offline}
+        yield {'type': 'done', 'data': {}}
+        return
+
     if state.get('busy'):
         yield {'type': 'meta', 'data': {
             'message': "The AI is a bit busy right now — please try again in a few seconds. Meanwhile I can still answer instantly about projects, skills, certificates, education and contact.",
@@ -492,9 +605,7 @@ def stream_response(message, history=None, mode='auto'):
         yield {'type': 'done', 'data': {}}
         return
 
-    yield {'type': 'meta', 'data': {
-        'message': "I couldn't find that in the portfolio. Try asking about projects, skills, certificates, education or contact details.",
-        'source': 'fallback', 'answered': False, 'suggestions': sugg}}
+    yield {'type': 'meta', 'data': _deflect()}
     yield {'type': 'done', 'data': {}}
 
 
