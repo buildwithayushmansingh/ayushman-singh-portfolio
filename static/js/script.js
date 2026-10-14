@@ -415,6 +415,10 @@ document.querySelectorAll('a, button').forEach(el => {
       window.open('https://www.linkedin.com/in/ayushman-singh-147434367/', '_blank', 'noopener');
       return 'Opening LinkedIn...';
     },
+    space() {
+      if (window.openPrivateSpace) window.openPrivateSpace();
+      return 'Opening...';
+    },
     clear() {
       termBody.innerHTML = '';
       return null;
@@ -1520,4 +1524,20 @@ document.querySelectorAll('a, button').forEach(el => {
       card.classList.add(highlight.includes(card.dataset.projectId) ? 'ai-highlight' : 'ai-dimmed');
     });
   }
+})();
+// ---------- Secret entrance to the private space ----------
+// Tap the footer "© 2026" text 5 times quickly, or open the terminal (Ctrl+K) and type: space
+(function () {
+  const SPACE_PATH = '/space';   // must match SPACE_PATH in your Render environment
+  window.openPrivateSpace = () => { window.location.href = SPACE_PATH; };
+
+  const secret = document.querySelector('[data-secret-tap]');
+  if (!secret) return;
+  let taps = 0, timer = null;
+  secret.addEventListener('click', () => {
+    taps++;
+    clearTimeout(timer);
+    timer = setTimeout(() => { taps = 0; }, 2500);
+    if (taps >= 5) { taps = 0; window.openPrivateSpace(); }
+  });
 })();
