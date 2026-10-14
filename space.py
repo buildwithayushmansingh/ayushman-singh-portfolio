@@ -1,18 +1,21 @@
 """
 Personal Space - a private, password-protected dashboard (notes, goals, habit tracker).
 
-Registered as a Flask blueprint under /space.
+Registered as a Flask blueprint. The URL path comes from SPACE_PATH (default /space),
+so you can use something like /google-workspace.
  * Completely OFF (404) unless SPACE_PASSWORD or SPACE_PASSWORD_HASH is set in .env
  * Data lives in data/space.db (already covered by .gitignore -> data/*.db)
  * Never linked from the public site, never indexed, never read by the AI agent.
 """
 import os
+import re
 import json
 import time
 import hmac
 import secrets
 import sqlite3
 from datetime import date, datetime, timedelta
+from urllib.parse import urlparse
 from contextlib import contextmanager
 from functools import wraps
 
@@ -20,16 +23,27 @@ from flask import (Blueprint, Response, abort, current_app, jsonify, redirect,
                    request, session, url_for)
 from werkzeug.security import check_password_hash
 
-space_bp = Blueprint('space', __name__, url_prefix='/space')
+space_bp = Blueprint('space', __name__)
 
 DB_PATH = os.path.join(os.path.dirname(__file__), 'data', 'space.db')
 SESSION_HOURS = 12
 MAX_FAILS, FAIL_WINDOW = 8, 600          # 8 wrong passwords per 10 minutes (global - this is a one-person space)
-LIMITS = {'notes': 2000, 'goals': 200, 'habits': 50}
+LIMITS = {'notes': 2000, 'goals': 200, 'habits': 50, 'tasks': 3000, 'journal': 3000, 'applications': 1000, 'links': 2000, 'focus': 20000}
+STATUSES = ('wishlist', 'applied', 'interview', 'offer', 'rejected')
 _fails = []
 
 
 # ------------------------------------------------------------------ setup ---
+def _url_prefix():
+    """URL path of the private space, from SPACE_PATH. Falls back to /space if it looks unsafe."""
+    raw = (os.environ.get('SPACE_PATH') or '/space').strip().strip('/')
+    if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,60}', raw) or raw.lower() in ('static', 'api', 'admin'):
+        if os.environ.get('SPACE_PATH'):
+            print('[space] SPACE_PATH is not valid (use letters, numbers, - or _) - using /space instead.')
+        raw = 'space'
+    return '/' + raw
+
+
 def init_app(app):
     """Call once from app.py: configures sessions, creates the DB, registers the blueprint."""
     if not app.secret_key:
@@ -43,7 +57,7 @@ def init_app(app):
     if os.environ.get('SPACE_SECURE_COOKIE') == '1':      # set this on HTTPS hosting (Render etc.)
         app.config['SESSION_COOKIE_SECURE'] = True
     init_db()
-    app.register_blueprint(space_bp)
+    app.register_blueprint(space_bp, url_prefix=_url_prefix())
 
 
 @contextmanager
@@ -73,6 +87,22 @@ def init_db():
         CREATE TABLE IF NOT EXISTS checkins (
             habit_id INTEGER NOT NULL REFERENCES habits(id) ON DELETE CASCADE, day TEXT NOT NULL,
             PRIMARY KEY (habit_id, day));
+        CREATE TABLE IF NOT EXISTS tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, done INTEGER NOT NULL DEFAULT 0,
+            priority INTEGER NOT NULL DEFAULT 0, due TEXT NOT NULL DEFAULT '', created TEXT NOT NULL,
+            completed TEXT NOT NULL DEFAULT '');
+        CREATE TABLE IF NOT EXISTS journal (
+            day TEXT PRIMARY KEY, mood INTEGER NOT NULL DEFAULT 0, body TEXT NOT NULL DEFAULT '', updated TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS applications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, company TEXT NOT NULL, role TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'applied', applied_on TEXT NOT NULL DEFAULT '', follow_up TEXT NOT NULL DEFAULT '',
+            link TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', created TEXT NOT NULL, updated TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS links (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL DEFAULT '', url TEXT NOT NULL,
+            tag TEXT NOT NULL DEFAULT '', created TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS focus (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, day TEXT NOT NULL, minutes INTEGER NOT NULL,
+            label TEXT NOT NULL DEFAULT '', created TEXT NOT NULL);
         """)
 
 
@@ -187,7 +217,7 @@ def logout():
     return redirect(url_for('space.login'))
 
 
-@space_bp.route('/')
+@space_bp.route('/', strict_slashes=False)      # /space and /space/ both work, no redirect
 @_page
 def dashboard():
     return _render('space/dashboard.html', csrf=_csrf())
@@ -257,6 +287,74 @@ def _clean_goal(d, partial=False):
             raise ValueError('Invalid status.')
         out['status'] = status
     return out
+
+
+def _int(value, lo, hi, field):
+    try:
+        v = int(value)
+    except (TypeError, ValueError):
+        raise ValueError(f'{field} must be a number.')
+    if not lo <= v <= hi:
+        raise ValueError(f'{field} must be between {lo} and {hi}.')
+    return v
+
+
+def _url(value):
+    v = _s(value, 500, 'Link')
+    if not v:
+        return ''
+    p = urlparse(v)
+    if p.scheme not in ('http', 'https') or not p.netloc or any(ch.isspace() for ch in v):
+        raise ValueError('Link must start with http:// or https://')
+    return v
+
+
+def _clean_task(d, partial=False):
+    out = {}
+    if not partial or 'title' in d: out['title'] = _s(d.get('title'), 200, 'Task', required=True)
+    if not partial or 'done' in d: out['done'] = 1 if d.get('done') else 0
+    if not partial or 'priority' in d: out['priority'] = _int(d.get('priority', 0), 0, 3, 'Priority')
+    if not partial or 'due' in d: out['due'] = _day(d.get('due'), 'Due date', allow_empty=True)
+    return out
+
+
+def _clean_app(d, partial=False):
+    out = {}
+    if not partial or 'company' in d: out['company'] = _s(d.get('company'), 80, 'Company', required=True)
+    if not partial or 'role' in d: out['role'] = _s(d.get('role'), 80, 'Role')
+    if not partial or 'status' in d:
+        status = d.get('status', 'applied')
+        if status not in STATUSES:
+            raise ValueError('Invalid status.')
+        out['status'] = status
+    if not partial or 'applied_on' in d: out['applied_on'] = _day(d.get('applied_on'), 'Applied date', allow_empty=True)
+    if not partial or 'follow_up' in d: out['follow_up'] = _day(d.get('follow_up'), 'Follow-up date', allow_empty=True)
+    if not partial or 'link' in d: out['link'] = _url(d.get('link'))
+    if not partial or 'notes' in d: out['notes'] = _s(d.get('notes'), 2000, 'Notes')
+    return out
+
+
+def _clean_link(d, partial=False):
+    out = {}
+    if not partial or 'url' in d:
+        out['url'] = _url(d.get('url'))
+        if not out['url']:
+            raise ValueError('Link is required.')
+    if not partial or 'title' in d: out['title'] = _s(d.get('title'), 100, 'Title')
+    if not partial or 'tag' in d: out['tag'] = _s(d.get('tag'), 30, 'Tag').lstrip('#')
+    return out
+
+
+def _clean_journal(d):
+    return {'mood': _int(d.get('mood', 0), 0, 5, 'Mood'), 'body': _s(d.get('body'), 20000, 'Entry')}
+
+
+def _clean_focus(d):
+    day = _day(d.get('day') or date.today().isoformat(), 'Day')
+    dd = date.fromisoformat(day)
+    if dd > date.today() + timedelta(days=1) or dd < date.today() - timedelta(days=60):
+        raise ValueError('You can only log the last 60 days.')
+    return {'day': day, 'minutes': _int(d.get('minutes'), 1, 480, 'Minutes'), 'label': _s(d.get('label'), 60, 'Label')}
 
 
 def _body():
@@ -329,7 +427,16 @@ def state():
         notes = [_note_row(r) for r in c.execute('SELECT * FROM notes ORDER BY pinned DESC, updated DESC')]
         goals = [_goal_row(r) for r in c.execute("SELECT * FROM goals ORDER BY status = 'done', target_date = '', target_date, id")]
         habits = _habit_rows(c, today)
-    return jsonify({'notes': notes, 'goals': goals, 'habits': habits, 'today': today.isoformat()})
+        tasks = [dict(r) | {'done': bool(r['done'])} for r in c.execute('SELECT * FROM tasks ORDER BY id')]
+        journal = [dict(r) for r in c.execute('SELECT day, mood, substr(body, 1, 120) AS preview, length(body) AS chars FROM journal ORDER BY day DESC')]
+        apps = [dict(r) for r in c.execute('SELECT * FROM applications ORDER BY id DESC')]
+        links = [dict(r) for r in c.execute('SELECT * FROM links ORDER BY id DESC')]
+        since = (today - timedelta(days=120)).isoformat()
+        focus_days = {r['day']: r['minutes'] for r in c.execute('SELECT day, SUM(minutes) AS minutes FROM focus WHERE day >= ? GROUP BY day', (since,))}
+        focus_recent = [dict(r) for r in c.execute('SELECT id, day, minutes, label FROM focus ORDER BY id DESC LIMIT 12')]
+    return jsonify({'notes': notes, 'goals': goals, 'habits': habits, 'tasks': tasks, 'journal': journal,
+                    'applications': apps, 'links': links, 'focus_days': focus_days, 'focus_recent': focus_recent,
+                    'today': today.isoformat()})
 
 
 # notes
@@ -463,6 +570,212 @@ def habit_toggle(hid):
     return jsonify({'checked': checked})
 
 
+# tasks
+def _crud_insert(table, data, extra=None):
+    cols = {**data, **(extra or {})}
+    keys = ', '.join(cols)
+    return f'INSERT INTO {table} ({keys}) VALUES ({", ".join("?" * len(cols))})', tuple(cols.values())
+
+
+def _check_limit(c, table, key=None):
+    if _count(c, table) >= LIMITS[key or table]:
+        raise ValueError('Limit reached for this section.')
+
+
+@space_bp.post('/api/tasks')
+@_api
+def task_create():
+    data = _clean_task(_body())
+    with _db() as c:
+        _check_limit(c, 'tasks')
+        sql, vals = _crud_insert('tasks', data, {'created': _now(), 'completed': _now() if data['done'] else ''})
+        row = c.execute('SELECT * FROM tasks WHERE id=?', (c.execute(sql, vals).lastrowid,)).fetchone()
+    return jsonify(dict(row) | {'done': bool(row['done'])}), 201
+
+
+@space_bp.put('/api/tasks/<int:tid>')
+@_api
+def task_update(tid):
+    data = _clean_task(_body(), partial=True)
+    if not data:
+        raise ValueError('Nothing to update.')
+    if 'done' in data:
+        data['completed'] = _now() if data['done'] else ''
+    sets = ', '.join(f'{k}=?' for k in data)
+    with _db() as c:
+        if not c.execute('SELECT 1 FROM tasks WHERE id=?', (tid,)).fetchone():
+            return jsonify({'error': 'Task not found.'}), 404
+        c.execute(f'UPDATE tasks SET {sets} WHERE id=?', (*data.values(), tid))
+        row = c.execute('SELECT * FROM tasks WHERE id=?', (tid,)).fetchone()
+    return jsonify(dict(row) | {'done': bool(row['done'])})
+
+
+@space_bp.delete('/api/tasks/<int:tid>')
+@_api
+def task_delete(tid):
+    with _db() as c:
+        c.execute('DELETE FROM tasks WHERE id=?', (tid,))
+    return jsonify({'ok': True})
+
+
+# journal (one entry per day)
+@space_bp.get('/api/journal/<day>')
+@_api
+def journal_get(day):
+    day = _day(day, 'Day')
+    with _db() as c:
+        row = c.execute('SELECT * FROM journal WHERE day=?', (day,)).fetchone()
+    return jsonify(dict(row) if row else {'day': day, 'mood': 0, 'body': '', 'updated': ''})
+
+
+@space_bp.put('/api/journal/<day>')
+@_api
+def journal_put(day):
+    day = _day(day, 'Day')
+    if date.fromisoformat(day) > date.today() + timedelta(days=1):
+        raise ValueError('You cannot write entries for the future.')
+    data = _clean_journal(_body())
+    with _db() as c:
+        exists = c.execute('SELECT 1 FROM journal WHERE day=?', (day,)).fetchone()
+        if not data['mood'] and not data['body']:
+            c.execute('DELETE FROM journal WHERE day=?', (day,))
+            return jsonify({'day': day, 'mood': 0, 'preview': '', 'chars': 0, 'deleted': True})
+        if not exists:
+            _check_limit(c, 'journal')
+        c.execute('INSERT INTO journal (day, mood, body, updated) VALUES (?,?,?,?) '
+                  'ON CONFLICT(day) DO UPDATE SET mood=excluded.mood, body=excluded.body, updated=excluded.updated',
+                  (day, data['mood'], data['body'], _now()))
+    return jsonify({'day': day, 'mood': data['mood'], 'preview': data['body'][:120], 'chars': len(data['body'])})
+
+
+@space_bp.delete('/api/journal/<day>')
+@_api
+def journal_delete(day):
+    with _db() as c:
+        c.execute('DELETE FROM journal WHERE day=?', (_day(day, 'Day'),))
+    return jsonify({'ok': True})
+
+
+# applications (internship / job tracker)
+@space_bp.post('/api/applications')
+@_api
+def app_create():
+    data = _clean_app(_body())
+    now = _now()
+    with _db() as c:
+        _check_limit(c, 'applications')
+        sql, vals = _crud_insert('applications', data, {'created': now, 'updated': now})
+        row = c.execute('SELECT * FROM applications WHERE id=?', (c.execute(sql, vals).lastrowid,)).fetchone()
+    return jsonify(dict(row)), 201
+
+
+@space_bp.put('/api/applications/<int:aid>')
+@_api
+def app_update(aid):
+    data = _clean_app(_body(), partial=True)
+    if not data:
+        raise ValueError('Nothing to update.')
+    data['updated'] = _now()
+    sets = ', '.join(f'{k}=?' for k in data)
+    with _db() as c:
+        if not c.execute('SELECT 1 FROM applications WHERE id=?', (aid,)).fetchone():
+            return jsonify({'error': 'Application not found.'}), 404
+        c.execute(f'UPDATE applications SET {sets} WHERE id=?', (*data.values(), aid))
+        row = c.execute('SELECT * FROM applications WHERE id=?', (aid,)).fetchone()
+    return jsonify(dict(row))
+
+
+@space_bp.delete('/api/applications/<int:aid>')
+@_api
+def app_delete(aid):
+    with _db() as c:
+        c.execute('DELETE FROM applications WHERE id=?', (aid,))
+    return jsonify({'ok': True})
+
+
+# links vault
+@space_bp.post('/api/links')
+@_api
+def link_create():
+    data = _clean_link(_body())
+    with _db() as c:
+        _check_limit(c, 'links')
+        sql, vals = _crud_insert('links', data, {'created': _now()})
+        row = c.execute('SELECT * FROM links WHERE id=?', (c.execute(sql, vals).lastrowid,)).fetchone()
+    return jsonify(dict(row)), 201
+
+
+@space_bp.put('/api/links/<int:lid>')
+@_api
+def link_update(lid):
+    data = _clean_link(_body(), partial=True)
+    if not data:
+        raise ValueError('Nothing to update.')
+    sets = ', '.join(f'{k}=?' for k in data)
+    with _db() as c:
+        if not c.execute('SELECT 1 FROM links WHERE id=?', (lid,)).fetchone():
+            return jsonify({'error': 'Link not found.'}), 404
+        c.execute(f'UPDATE links SET {sets} WHERE id=?', (*data.values(), lid))
+        row = c.execute('SELECT * FROM links WHERE id=?', (lid,)).fetchone()
+    return jsonify(dict(row))
+
+
+@space_bp.delete('/api/links/<int:lid>')
+@_api
+def link_delete(lid):
+    with _db() as c:
+        c.execute('DELETE FROM links WHERE id=?', (lid,))
+    return jsonify({'ok': True})
+
+
+# focus sessions
+@space_bp.post('/api/focus')
+@_api
+def focus_create():
+    data = _clean_focus(_body())
+    with _db() as c:
+        _check_limit(c, 'focus')
+        sql, vals = _crud_insert('focus', data, {'created': _now()})
+        c.execute(sql, vals)
+    return jsonify({'ok': True}), 201
+
+
+@space_bp.delete('/api/focus/<int:fid>')
+@_api
+def focus_delete(fid):
+    with _db() as c:
+        c.execute('DELETE FROM focus WHERE id=?', (fid,))
+    return jsonify({'ok': True})
+
+
+# global search (Ctrl+K)
+@space_bp.get('/api/search')
+@_api
+def search():
+    q = (request.args.get('q') or '').strip()[:60]
+    if len(q) < 2:
+        return jsonify({'results': []})
+    like = '%' + re.sub(r'([!%_])', r'!\1', q) + '%'
+    out = []
+    with _db() as c:
+        def run(kind, sql, build):
+            for r in c.execute(sql, (like,) * sql.count('?')).fetchall():
+                out.append({'type': kind, **build(r)})
+        run('note', "SELECT id, title, body FROM notes WHERE title LIKE ? ESCAPE '!' OR body LIKE ? ESCAPE '!' OR tag LIKE ? ESCAPE '!' ORDER BY updated DESC LIMIT 6",
+            lambda r: {'id': r['id'], 'title': r['title'] or r['body'][:50] or 'Untitled note', 'snippet': r['body'][:90]})
+        run('task', "SELECT id, title, done FROM tasks WHERE title LIKE ? ESCAPE '!' ORDER BY done, id DESC LIMIT 6",
+            lambda r: {'id': r['id'], 'title': r['title'], 'snippet': 'done' if r['done'] else 'open'})
+        run('goal', "SELECT id, title, description FROM goals WHERE title LIKE ? ESCAPE '!' OR description LIKE ? ESCAPE '!' LIMIT 6",
+            lambda r: {'id': r['id'], 'title': r['title'], 'snippet': r['description'][:90]})
+        run('journal', "SELECT day, body FROM journal WHERE body LIKE ? ESCAPE '!' ORDER BY day DESC LIMIT 6",
+            lambda r: {'id': r['day'], 'title': r['day'], 'snippet': r['body'][:90]})
+        run('application', "SELECT id, company, role, status FROM applications WHERE company LIKE ? ESCAPE '!' OR role LIKE ? ESCAPE '!' OR notes LIKE ? ESCAPE '!' LIMIT 6",
+            lambda r: {'id': r['id'], 'title': r['company'], 'snippet': (r['role'] + ' · ' + r['status']).strip(' ·')})
+        run('link', "SELECT id, title, url FROM links WHERE title LIKE ? ESCAPE '!' OR url LIKE ? ESCAPE '!' OR tag LIKE ? ESCAPE '!' LIMIT 6",
+            lambda r: {'id': r['id'], 'title': r['title'] or r['url'], 'snippet': r['url'][:90]})
+    return jsonify({'results': out})
+
+
 # backup
 @space_bp.get('/api/export')
 @_api
@@ -474,49 +787,61 @@ def export_all():
         habits = [{'name': h['name'], 'archived': bool(h['archived']),
                    'days': [r['day'] for r in c.execute('SELECT day FROM checkins WHERE habit_id=? ORDER BY day', (h['id'],))]}
                   for h in c.execute('SELECT * FROM habits ORDER BY id')]
-    payload = json.dumps({'version': 1, 'exported': _now(), 'notes': notes, 'goals': goals, 'habits': habits}, indent=2)
+        tasks = [{**{k: r[k] for k in ('title', 'priority', 'due')}, 'done': bool(r['done'])} for r in c.execute('SELECT * FROM tasks ORDER BY id')]
+        journal = [{k: r[k] for k in ('day', 'mood', 'body')} for r in c.execute('SELECT * FROM journal ORDER BY day')]
+        apps = [{k: r[k] for k in ('company', 'role', 'status', 'applied_on', 'follow_up', 'link', 'notes')} for r in c.execute('SELECT * FROM applications ORDER BY id')]
+        links = [{k: r[k] for k in ('title', 'url', 'tag')} for r in c.execute('SELECT * FROM links ORDER BY id')]
+        focus = [{k: r[k] for k in ('day', 'minutes', 'label')} for r in c.execute('SELECT * FROM focus ORDER BY id')]
+    payload = json.dumps({'version': 2, 'exported': _now(), 'notes': notes, 'goals': goals, 'habits': habits, 'tasks': tasks,
+                          'journal': journal, 'applications': apps, 'links': links, 'focus': focus}, indent=2)
     return Response(payload, mimetype='application/json',
                     headers={'Content-Disposition': f'attachment; filename=personal-space-{date.today().isoformat()}.json'})
+
+
+def _list(data, key):
+    items = data.get(key, [])
+    if not isinstance(items, list):
+        raise ValueError('Invalid backup file.')
+    if len(items) > LIMITS[key if key in LIMITS else 'habits']:
+        raise ValueError('Backup has too many items.')
+    return items
 
 
 @space_bp.post('/api/import')
 @_api
 def import_all():
-    if (request.content_length or 0) > 2_000_000:
-        raise ValueError('Backup file is too large (max 2 MB).')
+    if (request.content_length or 0) > 4_000_000:
+        raise ValueError('Backup file is too large (max 4 MB).')
     body = _body()
-    mode = body.get('mode')
-    data = body.get('data')
+    mode, data = body.get('mode'), body.get('data')
     if mode not in ('merge', 'replace') or not isinstance(data, dict):
         raise ValueError('Invalid backup file.')
-    notes, goals, habits = data.get('notes', []), data.get('goals', []), data.get('habits', [])
-    if not all(isinstance(x, list) for x in (notes, goals, habits)):
-        raise ValueError('Invalid backup file.')
-    if len(notes) > LIMITS['notes'] or len(goals) > LIMITS['goals'] or len(habits) > LIMITS['habits']:
-        raise ValueError('Backup has too many items.')
+    notes, goals, habits = _list(data, 'notes'), _list(data, 'goals'), _list(data, 'habits')
+    tasks, journal, apps = _list(data, 'tasks'), _list(data, 'journal'), _list(data, 'applications')
+    links, focus = _list(data, 'links'), _list(data, 'focus')
 
-    clean_notes = []
-    for n in notes:
-        c = _clean_note(n)
-        c.update(created=_iso(n.get('created')), updated=_iso(n.get('updated')))
-        clean_notes.append(c)
-    clean_goals = []
-    for g in goals:
-        c = _clean_goal(g)
-        c.update(created=_iso(g.get('created')), updated=_iso(g.get('updated')))
-        clean_goals.append(c)
-    clean_habits = []
-    for h in habits:
-        clean_habits.append({'name': _s(h.get('name'), 60, 'Habit name', required=True),
-                             'archived': 1 if h.get('archived') else 0,
-                             'days': sorted({_day(d) for d in (h.get('days') or [])[:5000]})})
+    clean_notes = [{**_clean_note(n), 'created': _iso(n.get('created')), 'updated': _iso(n.get('updated'))} for n in notes]
+    clean_goals = [{**_clean_goal(g), 'created': _iso(g.get('created')), 'updated': _iso(g.get('updated'))} for g in goals]
+    clean_habits = [{'name': _s(h.get('name'), 60, 'Habit name', required=True), 'archived': 1 if h.get('archived') else 0,
+                     'days': sorted({_day(d) for d in (h.get('days') or [])[:5000]})} for h in habits]
+    clean_tasks = [_clean_task(t) for t in tasks]
+    clean_journal = [{'day': _day(j.get('day'), 'Journal day'), **_clean_journal(j)} for j in journal]
+    clean_apps = [_clean_app(a) for a in apps]
+    clean_links = [_clean_link(l) for l in links]
+    clean_focus = []
+    for f in focus:
+        clean_focus.append({'day': _day(f.get('day'), 'Focus day'), 'minutes': _int(f.get('minutes'), 1, 480, 'Minutes'), 'label': _s(f.get('label'), 60, 'Label')})
 
+    now = _now()
     with _db() as c:
         if mode == 'replace':
-            for t in ('checkins', 'habits', 'goals', 'notes'):
+            for t in ('checkins', 'habits', 'goals', 'notes', 'tasks', 'journal', 'applications', 'links', 'focus'):
                 c.execute(f'DELETE FROM {t}')
-        elif (_count(c, 'notes') + len(clean_notes) > LIMITS['notes'] or _count(c, 'goals') + len(clean_goals) > LIMITS['goals']):
-            raise ValueError('Merging would exceed the item limits.')
+        else:
+            for table, items in (('notes', clean_notes), ('goals', clean_goals), ('tasks', clean_tasks),
+                                 ('applications', clean_apps), ('links', clean_links), ('focus', clean_focus)):
+                if _count(c, table) + len(items) > LIMITS[table]:
+                    raise ValueError('Merging would exceed the item limits.')
         for n in clean_notes:
             c.execute('INSERT INTO notes (title, body, tag, pinned, created, updated) VALUES (?,?,?,?,?,?)',
                       (n['title'], n['body'], n['tag'], n['pinned'], n['created'], n['updated']))
@@ -530,6 +855,21 @@ def import_all():
             else:
                 if _count(c, 'habits') >= LIMITS['habits']:
                     raise ValueError('Habit limit reached.')
-                hid = c.execute('INSERT INTO habits (name, archived, created) VALUES (?,?,?)', (h['name'], h['archived'], _now())).lastrowid
+                hid = c.execute('INSERT INTO habits (name, archived, created) VALUES (?,?,?)', (h['name'], h['archived'], now)).lastrowid
             c.executemany('INSERT OR IGNORE INTO checkins (habit_id, day) VALUES (?,?)', [(hid, d) for d in h['days']])
-    return jsonify({'ok': True, 'notes': len(clean_notes), 'goals': len(clean_goals), 'habits': len(clean_habits)})
+        for t in clean_tasks:
+            c.execute('INSERT INTO tasks (title, done, priority, due, created, completed) VALUES (?,?,?,?,?,?)',
+                      (t['title'], t['done'], t['priority'], t['due'], now, now if t['done'] else ''))
+        for j in clean_journal:
+            c.execute('INSERT OR IGNORE INTO journal (day, mood, body, updated) VALUES (?,?,?,?)', (j['day'], j['mood'], j['body'], now))
+        for a in clean_apps:
+            c.execute('INSERT INTO applications (company, role, status, applied_on, follow_up, link, notes, created, updated) VALUES (?,?,?,?,?,?,?,?,?)',
+                      (a['company'], a['role'], a['status'], a['applied_on'], a['follow_up'], a['link'], a['notes'], now, now))
+        for l in clean_links:
+            if not c.execute('SELECT 1 FROM links WHERE url=?', (l['url'],)).fetchone():
+                c.execute('INSERT INTO links (title, url, tag, created) VALUES (?,?,?,?)', (l['title'], l['url'], l['tag'], now))
+        for f in clean_focus:
+            c.execute('INSERT INTO focus (day, minutes, label, created) VALUES (?,?,?,?)', (f['day'], f['minutes'], f['label'], now))
+    return jsonify({'ok': True, 'notes': len(clean_notes), 'goals': len(clean_goals), 'habits': len(clean_habits),
+                    'tasks': len(clean_tasks), 'journal': len(clean_journal), 'applications': len(clean_apps),
+                    'links': len(clean_links), 'focus': len(clean_focus)})
