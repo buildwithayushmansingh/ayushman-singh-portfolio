@@ -13,6 +13,8 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='css/space.css') }}">
 </head>
 <body class="sp-login-body">
+{% with kind='login', first='PRIVATE AREA', granted='SECURE CONNECTION ✓' %}{% include 'space/_intro.html' %}{% endwith %}
+
   <main class="sp-login">
     <div class="sp-login-card">
       <div class="sp-login-icon" aria-hidden="true">
@@ -31,5 +33,6 @@
       <a class="sp-back" href="{{ url_for('home') }}">← Back to portfolio</a>
     </div>
   </main>
+<script src="{{ url_for('static', filename='js/space-intro.js') }}"></script>
 </body>
 </html>

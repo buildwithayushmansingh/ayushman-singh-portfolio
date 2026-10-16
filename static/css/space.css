@@ -2143,3 +2143,456 @@ select.sp-input {
         font-size: 38px;
     }
 }
+
+/* =====================================================================
+   v3 — 3D intro (cube + gyroscope rings + grid floor) and 3D page entrance
+   ===================================================================== */
+.sp-intro {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    perspective: 1100px;
+    background: radial-gradient(ellipse at 50% 42%, color-mix(in srgb, var(--accent) 14%, var(--bg)) 0%, var(--bg) 62%);
+    opacity: 1;
+    transition: opacity 0.75s ease, visibility 0.75s;
+    cursor: pointer;
+    animation: spFailsafe 0.01s 9s forwards;
+    /* if JS ever fails, never trap the page */
+}
+
+.sp-intro.is-done {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+}
+
+@keyframes spFailsafe {
+    to {
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+    }
+}
+
+/* grid floor flying towards the viewer */
+.sp-intro-grid {
+    position: absolute;
+    left: -60%;
+    right: -60%;
+    bottom: -8%;
+    height: 62%;
+    transform-origin: 50% 100%;
+    transform: rotateX(74deg);
+    background-image: linear-gradient(var(--accent) 1px, transparent 1px), linear-gradient(90deg, var(--accent) 1px, transparent 1px);
+    background-size: 64px 64px;
+    opacity: 0;
+    animation: spGridMove 0.9s linear infinite;
+    -webkit-mask-image: linear-gradient(transparent 0%, #000 55%);
+    mask-image: linear-gradient(transparent 0%, #000 55%);
+    transition: opacity 0.8s ease;
+}
+
+.sp-intro.is-in .sp-intro-grid {
+    opacity: 0.32;
+}
+
+@keyframes spGridMove {
+    to {
+        background-position: 0 64px;
+    }
+}
+
+.sp-intro-glow {
+    position: absolute;
+    width: 520px;
+    height: 520px;
+    border-radius: 50%;
+    background: radial-gradient(circle, var(--accent-soft), transparent 68%);
+    filter: blur(10px);
+    opacity: 0;
+    transition: opacity 1s ease;
+}
+
+.sp-intro.is-in .sp-intro-glow {
+    opacity: 1;
+}
+
+/* the 3D object */
+.sp-scene {
+    position: relative;
+    width: 220px;
+    height: 220px;
+    transform-style: preserve-3d;
+    opacity: 0;
+    transform: translateZ(-500px) scale(0.5);
+    transition: opacity 0.7s ease, transform 1.1s cubic-bezier(0.2, 1.2, 0.3, 1);
+}
+
+.sp-intro.is-in .sp-scene {
+    opacity: 1;
+    transform: translateZ(0) scale(1);
+    animation: spFloat 3.2s ease-in-out 1.1s infinite;
+}
+
+@keyframes spFloat {
+    50% {
+        transform: translateY(-12px) rotateX(6deg);
+    }
+}
+
+.sp-cube {
+    position: absolute;
+    inset: 0;
+    margin: auto;
+    width: 120px;
+    height: 120px;
+    transform-style: preserve-3d;
+    animation: spCube 5.5s linear infinite;
+}
+
+@keyframes spCube {
+    from {
+        transform: rotateX(-22deg) rotateY(0deg);
+    }
+
+    to {
+        transform: rotateX(-22deg) rotateY(360deg);
+    }
+}
+
+.sp-face {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    color: var(--accent);
+    border: 1.5px solid var(--accent);
+    background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 18%, transparent), color-mix(in srgb, var(--accent-2) 8%, transparent));
+    box-shadow: inset 0 0 26px var(--accent-soft), 0 0 18px var(--accent-soft);
+    backface-visibility: visible;
+    transition: border-color 0.4s, color 0.4s, box-shadow 0.4s;
+}
+
+.sp-face svg {
+    width: 46px;
+    height: 46px;
+    stroke-width: 1.4;
+    opacity: 0.9;
+}
+
+.sp-face.f1 {
+    transform: translateZ(60px);
+}
+
+.sp-face.f2 {
+    transform: rotateY(90deg) translateZ(60px);
+}
+
+.sp-face.f3 {
+    transform: rotateY(180deg) translateZ(60px);
+}
+
+.sp-face.f4 {
+    transform: rotateY(-90deg) translateZ(60px);
+}
+
+.sp-face.f5 {
+    transform: rotateX(90deg) translateZ(60px);
+}
+
+.sp-face.f6 {
+    transform: rotateX(-90deg) translateZ(60px);
+}
+
+.sp-core {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 38px;
+    height: 38px;
+    margin: -19px 0 0 -19px;
+    border-radius: 50%;
+    background: radial-gradient(circle, #fff 0%, var(--accent) 45%, transparent 70%);
+    box-shadow: 0 0 40px var(--accent), 0 0 80px var(--accent-soft);
+    animation: spCore 1.1s ease-in-out infinite;
+}
+
+@keyframes spCore {
+    50% {
+        transform: scale(1.35);
+        opacity: 0.8;
+    }
+}
+
+/* gyroscope rings */
+.sp-ring {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    border-radius: 50%;
+    border: 2px solid transparent;
+    transition: border-color 0.5s, box-shadow 0.5s;
+}
+
+.sp-ring.r1 {
+    width: 200px;
+    height: 200px;
+    margin: -100px 0 0 -100px;
+    border-color: var(--accent) transparent var(--accent-2) transparent;
+    animation: spR1 2.8s linear infinite;
+}
+
+.sp-ring.r2 {
+    width: 250px;
+    height: 250px;
+    margin: -125px 0 0 -125px;
+    border-color: transparent var(--accent-2) transparent var(--accent);
+    border-style: dashed;
+    animation: spR2 3.6s linear infinite;
+}
+
+.sp-ring.r3 {
+    width: 300px;
+    height: 300px;
+    margin: -150px 0 0 -150px;
+    border-color: var(--accent) var(--accent) transparent transparent;
+    opacity: 0.7;
+    animation: spR3 4.6s linear infinite;
+}
+
+@keyframes spR1 {
+    from {
+        transform: rotateX(72deg) rotateZ(0);
+    }
+
+    to {
+        transform: rotateX(72deg) rotateZ(360deg);
+    }
+}
+
+@keyframes spR2 {
+    from {
+        transform: rotateY(72deg) rotateZ(0);
+    }
+
+    to {
+        transform: rotateY(72deg) rotateZ(-360deg);
+    }
+}
+
+@keyframes spR3 {
+    from {
+        transform: rotateX(38deg) rotateY(38deg) rotateZ(0);
+    }
+
+    to {
+        transform: rotateX(38deg) rotateY(38deg) rotateZ(360deg);
+    }
+}
+
+/* ACCESS GRANTED: everything turns green and snaps tighter */
+.sp-intro.is-granted .sp-face {
+    border-color: #3ddc84;
+    color: #3ddc84;
+    box-shadow: inset 0 0 30px rgba(61, 220, 132, 0.35), 0 0 26px rgba(61, 220, 132, 0.45);
+}
+
+.sp-intro.is-granted .sp-ring {
+    border-color: #3ddc84 transparent #3ddc84 transparent;
+    box-shadow: 0 0 22px rgba(61, 220, 132, 0.35);
+}
+
+.sp-intro.is-granted .sp-cube {
+    animation-duration: 1.4s;
+}
+
+.sp-intro.is-granted .sp-core {
+    background: radial-gradient(circle, #fff 0%, #3ddc84 45%, transparent 70%);
+    box-shadow: 0 0 50px #3ddc84, 0 0 100px rgba(61, 220, 132, 0.4);
+}
+
+.sp-intro.is-granted .sp-intro-line {
+    color: #3ddc84;
+}
+
+.sp-intro.is-granted .sp-intro-bar i {
+    background: #3ddc84;
+}
+
+/* OPEN: fly through the cube towards the viewer */
+.sp-intro.is-open .sp-scene {
+    animation: spFly 0.85s cubic-bezier(0.65, 0, 0.35, 1) forwards;
+}
+
+.sp-intro.is-in.is-open .sp-intro-text,
+.sp-intro.is-open .sp-intro-skip {
+    opacity: 0;
+    transition: opacity 0.25s 0s;
+}
+
+@keyframes spFly {
+    to {
+        transform: translateZ(1000px) rotateY(120deg) scale(1.2);
+        opacity: 0;
+    }
+}
+
+.sp-intro-text {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 11vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    opacity: 0;
+    transform: translateY(14px);
+    transition: opacity 0.6s 0.4s, transform 0.6s 0.4s;
+    pointer-events: none;
+}
+
+.sp-intro.is-in .sp-intro-text {
+    opacity: 1;
+    transform: none;
+}
+
+.sp-intro-brand {
+    font: 600 12px var(--font-mono);
+    letter-spacing: 0.3em;
+    color: var(--muted);
+}
+
+.sp-intro-brand b {
+    color: var(--accent);
+    font-weight: 700;
+    margin-left: 0.3em;
+}
+
+.sp-intro-line {
+    font: 700 15px var(--font-mono);
+    letter-spacing: 0.2em;
+    color: var(--text);
+    transition: color 0.3s;
+}
+
+.sp-intro-bar {
+    width: 220px;
+    height: 3px;
+    border-radius: 3px;
+    background: var(--surface-2);
+    overflow: hidden;
+}
+
+.sp-intro-bar i {
+    display: block;
+    width: 0;
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    transition: width linear;
+}
+
+.sp-intro-skip {
+    position: absolute;
+    right: 22px;
+    bottom: 22px;
+    padding: 8px 14px;
+    border: 1px solid var(--border);
+    border-radius: 100px;
+    background: var(--surface);
+    color: var(--muted);
+    font: 500 12px var(--font-mono);
+    cursor: pointer;
+    transition: color 0.2s, border-color 0.2s;
+}
+
+.sp-intro-skip:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
+/* page entrance after the intro (3D tilt-in) */
+.sp-entered .sp-main {
+    animation: spMainIn 1s cubic-bezier(0.2, 0.9, 0.25, 1) backwards;
+    transform-origin: 50% 0;
+}
+
+.sp-entered .sp-side {
+    animation: spSideIn 0.9s cubic-bezier(0.2, 0.9, 0.25, 1) backwards;
+}
+
+.sp-entered .sp-login-card {
+    animation: spCardIn 1s cubic-bezier(0.2, 0.9, 0.25, 1) backwards;
+}
+
+@keyframes spMainIn {
+    from {
+        opacity: 0;
+        transform: perspective(1500px) rotateX(12deg) translateY(46px) translateZ(-140px) scale(0.97);
+    }
+
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+@keyframes spSideIn {
+    from {
+        opacity: 0;
+        transform: perspective(1200px) rotateY(-28deg) translateX(-50px);
+    }
+
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+@keyframes spCardIn {
+    from {
+        opacity: 0;
+        transform: perspective(900px) rotateX(-32deg) rotateY(10deg) translateY(40px) scale(0.9);
+    }
+
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+@media (max-width: 900px) {
+    @keyframes spSideIn {
+        from {
+            opacity: 0;
+            transform: translateY(70px);
+        }
+
+        to {
+            opacity: 1;
+            transform: none;
+        }
+    }
+
+    .sp-scene {
+        transform: translateZ(-500px) scale(0.5);
+    }
+
+    .sp-intro.is-in .sp-scene {
+        transform: scale(0.85);
+    }
+
+    .sp-intro-skip {
+        bottom: 18px;
+        right: 14px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .sp-intro {
+        display: none;
+    }
+}

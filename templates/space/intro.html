@@ -1,0 +1,27 @@
+{# 3D intro overlay. Include with: {% with kind='dashboard', first='AUTHENTICATING…', granted='ACCESS GRANTED ✓' %}{% include 'space/_intro.html' %}{% endwith %} #}
+<div class="sp-intro" id="spIntro" role="status" aria-label="Opening private space"
+     data-kind="{{ kind }}" data-granted="{{ granted }}">
+  <div class="sp-intro-grid"></div>
+  <div class="sp-intro-glow"></div>
+  <div class="sp-scene">
+    <div class="sp-ring r1"></div>
+    <div class="sp-ring r2"></div>
+    <div class="sp-ring r3"></div>
+    <div class="sp-cube">
+      <div class="sp-face f1"><svg viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 018 0v3"/></svg></div>
+      <div class="sp-face f2"><svg viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 018 0v3"/></svg></div>
+      <div class="sp-face f3"><svg viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 018 0v3"/></svg></div>
+      <div class="sp-face f4"><svg viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 018 0v3"/></svg></div>
+      <div class="sp-face f5"></div>
+      <div class="sp-face f6"></div>
+      <div class="sp-core"></div>
+    </div>
+  </div>
+  <div class="sp-intro-text">
+    <span class="sp-intro-brand">PERSONAL<b>SPACE</b></span>
+    <span class="sp-intro-line" id="spIntroLine">{{ first }}</span>
+    <div class="sp-intro-bar"><i></i></div>
+  </div>
+  <button type="button" class="sp-intro-skip" id="spIntroSkip">Skip ›</button>
+</div>
+<noscript><style>.sp-intro { display: none !important; }</style></noscript>

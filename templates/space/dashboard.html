@@ -13,6 +13,8 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='css/space.css') }}">
 </head>
 <body class="sp-body" data-csrf="{{ csrf }}" data-api="{{ url_for('space.state')|replace('/state','') }}" data-login="{{ url_for('space.login') }}">
+{% with kind='dashboard', first='AUTHENTICATING…', granted='ACCESS GRANTED ✓' %}{% include 'space/_intro.html' %}{% endwith %}
+
 
 <div class="sp-shell">
   <aside class="sp-side">
@@ -272,6 +274,7 @@
 </div>
 
 <div class="sp-toast" id="toast" role="status" aria-live="polite" hidden></div>
+<script src="{{ url_for('static', filename='js/space-intro.js') }}"></script>
 <script src="{{ url_for('static', filename='js/space.js') }}"></script>
 </body>
 </html>
