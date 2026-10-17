@@ -9,6 +9,8 @@ so you can use something like /google-workspace.
 """
 import os
 import re
+import csv
+import io
 import json
 import time
 import hmac
@@ -28,7 +30,7 @@ space_bp = Blueprint('space', __name__)
 DB_PATH = os.path.join(os.path.dirname(__file__), 'data', 'space.db')
 SESSION_HOURS = 12
 MAX_FAILS, FAIL_WINDOW = 8, 600          # 8 wrong passwords per 10 minutes (global - this is a one-person space)
-LIMITS = {'notes': 2000, 'goals': 200, 'habits': 50, 'tasks': 3000, 'journal': 3000, 'applications': 1000, 'links': 2000, 'focus': 20000}
+LIMITS = {'notes': 2000, 'goals': 200, 'habits': 50, 'tasks': 3000, 'journal': 3000, 'applications': 1000, 'links': 2000, 'focus': 20000, 'reviews': 600}
 STATUSES = ('wishlist', 'applied', 'interview', 'offer', 'rejected')
 _fails = []
 
@@ -100,6 +102,9 @@ def init_db():
         CREATE TABLE IF NOT EXISTS links (
             id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL DEFAULT '', url TEXT NOT NULL,
             tag TEXT NOT NULL DEFAULT '', created TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS reviews (
+            week TEXT PRIMARY KEY, went_well TEXT NOT NULL DEFAULT '', improve TEXT NOT NULL DEFAULT '',
+            next_focus TEXT NOT NULL DEFAULT '', updated TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS focus (
             id INTEGER PRIMARY KEY AUTOINCREMENT, day TEXT NOT NULL, minutes INTEGER NOT NULL,
             label TEXT NOT NULL DEFAULT '', created TEXT NOT NULL);
@@ -355,6 +360,21 @@ def _clean_focus(d):
     if dd > date.today() + timedelta(days=1) or dd < date.today() - timedelta(days=60):
         raise ValueError('You can only log the last 60 days.')
     return {'day': day, 'minutes': _int(d.get('minutes'), 1, 480, 'Minutes'), 'label': _s(d.get('label'), 60, 'Label')}
+
+
+def _monday(value=None):
+    """Monday of the week that contains `value` (default: today)."""
+    try:
+        d = date.fromisoformat(value) if value else date.today()
+    except ValueError:
+        raise ValueError('Week must look like YYYY-MM-DD.')
+    return d - timedelta(days=d.weekday())
+
+
+def _clean_review(d):
+    return {'went_well': _s(d.get('went_well'), 3000, 'Reflection'),
+            'improve': _s(d.get('improve'), 3000, 'Reflection'),
+            'next_focus': _s(d.get('next_focus'), 3000, 'Reflection')}
 
 
 def _body():
@@ -776,6 +796,111 @@ def search():
     return jsonify({'results': out})
 
 
+# weekly review
+def _week_numbers(c, start, today):
+    """Everything the review page needs for the Monday-Sunday week starting at `start`."""
+    end = start + timedelta(days=6)
+    s, e = start.isoformat(), end.isoformat()
+    t = today.isoformat()
+    days = [(start + timedelta(days=i)).isoformat() for i in range(7)]
+    focus = {r['day']: r['m'] for r in c.execute('SELECT day, SUM(minutes) AS m FROM focus WHERE day BETWEEN ? AND ? GROUP BY day', (s, e))}
+    sessions = c.execute('SELECT COUNT(*) FROM focus WHERE day BETWEEN ? AND ?', (s, e)).fetchone()[0]
+    done = {r['d']: r['n'] for r in c.execute(
+        "SELECT substr(completed, 1, 10) AS d, COUNT(*) AS n FROM tasks WHERE done = 1 AND completed <> '' "
+        "AND substr(completed, 1, 10) BETWEEN ? AND ? GROUP BY d", (s, e))}
+    created = c.execute("SELECT COUNT(*) FROM tasks WHERE substr(created, 1, 10) BETWEEN ? AND ?", (s, e)).fetchone()[0]
+    mood = {r['day']: r['mood'] for r in c.execute('SELECT day, mood FROM journal WHERE day BETWEEN ? AND ?', (s, e))}
+    moods = [m for m in mood.values() if m]
+    notes = c.execute("SELECT COUNT(*) FROM notes WHERE substr(created, 1, 10) BETWEEN ? AND ?", (s, e)).fetchone()[0]
+    apps = c.execute("SELECT COUNT(*) FROM applications WHERE substr(created, 1, 10) BETWEEN ? AND ?", (s, e)).fetchone()[0]
+    elapsed = len([d for d in days if d <= t])
+    last_day = min(e, t)
+    per_day_habits = {r['day']: r['n'] for r in c.execute(
+        'SELECT k.day AS day, COUNT(*) AS n FROM checkins k JOIN habits h ON h.id = k.habit_id '
+        'WHERE h.archived = 0 AND k.day BETWEEN ? AND ? GROUP BY k.day', (s, last_day))}
+    habits = []
+    for h in c.execute('SELECT id, name FROM habits WHERE archived = 0 ORDER BY id').fetchall():
+        n = c.execute('SELECT COUNT(*) FROM checkins WHERE habit_id = ? AND day BETWEEN ? AND ?', (h['id'], s, last_day)).fetchone()[0]
+        habits.append({'id': h['id'], 'name': h['name'], 'done': n, 'possible': elapsed, 'pct': round(100 * n / elapsed) if elapsed else 0})
+    total_done = sum(h['done'] for h in habits)
+    return {
+        'start': s, 'end': e, 'is_current': start <= today <= end,
+        'days': [{'day': d, 'focus': focus.get(d, 0), 'mood': mood.get(d, 0), 'tasks_done': done.get(d, 0),
+                  'habits': per_day_habits.get(d, 0)} for d in days],
+        'focus': {'minutes': sum(focus.values()), 'sessions': sessions},
+        'tasks': {'done': sum(done.values()), 'created': created},
+        'habits': habits,
+        'habit_pct': round(100 * total_done / (len(habits) * elapsed)) if habits and elapsed else 0,
+        'journal': {'entries': len(mood), 'avg_mood': round(sum(moods) / len(moods), 1) if moods else 0},
+        'notes_created': notes, 'apps_added': apps,
+    }
+
+
+@space_bp.get('/api/review')
+@_api
+def review_get():
+    today = _client_today()
+    start = _monday(request.args.get('start'))
+    if start > _monday(today.isoformat()):
+        start = _monday(today.isoformat())                       # no future weeks
+    t = today.isoformat()
+    with _db() as c:
+        week = _week_numbers(c, start, today)
+        prev = _week_numbers(c, start - timedelta(days=7), today)
+        row = c.execute('SELECT * FROM reviews WHERE week = ?', (start.isoformat(),)).fetchone()
+        overdue = [dict(r) for r in c.execute("SELECT id, title, due FROM tasks WHERE done = 0 AND due <> '' AND due < ? ORDER BY due LIMIT 5", (t,))]
+        overdue_total = c.execute("SELECT COUNT(*) FROM tasks WHERE done = 0 AND due <> '' AND due < ?", (t,)).fetchone()[0]
+        followups = [dict(r) for r in c.execute(
+            "SELECT id, company, role, follow_up FROM applications WHERE follow_up <> '' AND follow_up <= ? "
+            "AND status IN ('applied', 'interview') ORDER BY follow_up LIMIT 5", ((today + timedelta(days=7)).isoformat(),))]
+        goals_due = [dict(r) for r in c.execute(
+            "SELECT id, title, target_date FROM goals WHERE status = 'active' AND target_date <> '' AND target_date <= ? "
+            "ORDER BY target_date LIMIT 5", ((today + timedelta(days=14)).isoformat(),))]
+    reflection = {'went_well': row['went_well'], 'improve': row['improve'], 'next_focus': row['next_focus']} if row else {'went_well': '', 'improve': '', 'next_focus': ''}
+    return jsonify({'week': week, 'prev': prev, 'reflection': reflection,
+                    'attention': {'overdue': overdue, 'overdue_total': overdue_total, 'followups': followups, 'goals_due': goals_due}})
+
+
+@space_bp.put('/api/review/<week>')
+@_api
+def review_put(week):
+    start = _monday(week)
+    if start > _monday(date.today().isoformat()) + timedelta(days=1):
+        raise ValueError('You cannot review a future week.')
+    data = _clean_review(_body())
+    with _db() as c:
+        if not any(data.values()):
+            c.execute('DELETE FROM reviews WHERE week = ?', (start.isoformat(),))
+            return jsonify({'ok': True, 'week': start.isoformat(), 'deleted': True})
+        if not c.execute('SELECT 1 FROM reviews WHERE week = ?', (start.isoformat(),)).fetchone():
+            _check_limit(c, 'reviews')
+        c.execute('INSERT INTO reviews (week, went_well, improve, next_focus, updated) VALUES (?,?,?,?,?) '
+                  'ON CONFLICT(week) DO UPDATE SET went_well=excluded.went_well, improve=excluded.improve, '
+                  'next_focus=excluded.next_focus, updated=excluded.updated',
+                  (start.isoformat(), data['went_well'], data['improve'], data['next_focus'], _now()))
+    return jsonify({'ok': True, 'week': start.isoformat()})
+
+
+# applications as CSV (opens in Excel / Google Sheets)
+def _csv_safe(value):
+    v = '' if value is None else str(value)
+    return ("'" + v) if v[:1] in ('=', '+', '-', '@', '\t', '\r') else v     # blocks spreadsheet formula injection
+
+
+@space_bp.get('/api/export/applications.csv')
+@_api
+def export_applications_csv():
+    cols = ['company', 'role', 'status', 'applied_on', 'follow_up', 'link', 'notes', 'created']
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(['Company', 'Role', 'Status', 'Applied on', 'Follow up on', 'Link', 'Notes', 'Added'])
+    with _db() as c:
+        for r in c.execute('SELECT * FROM applications ORDER BY id'):
+            writer.writerow([_csv_safe(r[k]) for k in cols])
+    return Response('\ufeff' + buf.getvalue(), mimetype='text/csv; charset=utf-8',
+                    headers={'Content-Disposition': f'attachment; filename=applications-{date.today().isoformat()}.csv'})
+
+
 # backup
 @space_bp.get('/api/export')
 @_api
@@ -792,8 +917,9 @@ def export_all():
         apps = [{k: r[k] for k in ('company', 'role', 'status', 'applied_on', 'follow_up', 'link', 'notes')} for r in c.execute('SELECT * FROM applications ORDER BY id')]
         links = [{k: r[k] for k in ('title', 'url', 'tag')} for r in c.execute('SELECT * FROM links ORDER BY id')]
         focus = [{k: r[k] for k in ('day', 'minutes', 'label')} for r in c.execute('SELECT * FROM focus ORDER BY id')]
+        reviews = [{k: r[k] for k in ('week', 'went_well', 'improve', 'next_focus')} for r in c.execute('SELECT * FROM reviews ORDER BY week')]
     payload = json.dumps({'version': 2, 'exported': _now(), 'notes': notes, 'goals': goals, 'habits': habits, 'tasks': tasks,
-                          'journal': journal, 'applications': apps, 'links': links, 'focus': focus}, indent=2)
+                          'journal': journal, 'applications': apps, 'links': links, 'focus': focus, 'reviews': reviews}, indent=2)
     return Response(payload, mimetype='application/json',
                     headers={'Content-Disposition': f'attachment; filename=personal-space-{date.today().isoformat()}.json'})
 
@@ -818,7 +944,7 @@ def import_all():
         raise ValueError('Invalid backup file.')
     notes, goals, habits = _list(data, 'notes'), _list(data, 'goals'), _list(data, 'habits')
     tasks, journal, apps = _list(data, 'tasks'), _list(data, 'journal'), _list(data, 'applications')
-    links, focus = _list(data, 'links'), _list(data, 'focus')
+    links, focus, reviews = _list(data, 'links'), _list(data, 'focus'), _list(data, 'reviews')
 
     clean_notes = [{**_clean_note(n), 'created': _iso(n.get('created')), 'updated': _iso(n.get('updated'))} for n in notes]
     clean_goals = [{**_clean_goal(g), 'created': _iso(g.get('created')), 'updated': _iso(g.get('updated'))} for g in goals]
@@ -832,10 +958,11 @@ def import_all():
     for f in focus:
         clean_focus.append({'day': _day(f.get('day'), 'Focus day'), 'minutes': _int(f.get('minutes'), 1, 480, 'Minutes'), 'label': _s(f.get('label'), 60, 'Label')})
 
+    clean_reviews = [{'week': _monday(r.get('week')).isoformat(), **_clean_review(r)} for r in reviews]
     now = _now()
     with _db() as c:
         if mode == 'replace':
-            for t in ('checkins', 'habits', 'goals', 'notes', 'tasks', 'journal', 'applications', 'links', 'focus'):
+            for t in ('checkins', 'habits', 'goals', 'notes', 'tasks', 'journal', 'applications', 'links', 'focus', 'reviews'):
                 c.execute(f'DELETE FROM {t}')
         else:
             for table, items in (('notes', clean_notes), ('goals', clean_goals), ('tasks', clean_tasks),
@@ -870,6 +997,9 @@ def import_all():
                 c.execute('INSERT INTO links (title, url, tag, created) VALUES (?,?,?,?)', (l['title'], l['url'], l['tag'], now))
         for f in clean_focus:
             c.execute('INSERT INTO focus (day, minutes, label, created) VALUES (?,?,?,?)', (f['day'], f['minutes'], f['label'], now))
+        for r in clean_reviews:
+            c.execute('INSERT OR IGNORE INTO reviews (week, went_well, improve, next_focus, updated) VALUES (?,?,?,?,?)',
+                      (r['week'], r['went_well'], r['improve'], r['next_focus'], now))
     return jsonify({'ok': True, 'notes': len(clean_notes), 'goals': len(clean_goals), 'habits': len(clean_habits),
                     'tasks': len(clean_tasks), 'journal': len(clean_journal), 'applications': len(clean_apps),
-                    'links': len(clean_links), 'focus': len(clean_focus)})
+                    'links': len(clean_links), 'focus': len(clean_focus), 'reviews': len(clean_reviews)})
